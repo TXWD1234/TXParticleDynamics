@@ -1,0 +1,49 @@
+{
+	"version": 3,
+	"configurePresets": [
+		{
+			"name": "config_debug",
+			"displayName": "config_debug",
+			"generator": "Ninja",
+			"binaryDir": "build",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Debug",
+				"CMAKE_INSTALL_PREFIX": "dist"
+			}
+		},
+		{
+			"name": "config_release",
+			"displayName": "config_release",
+			"generator": "Ninja",
+			"binaryDir": "build",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "Release",
+				"CMAKE_INSTALL_PREFIX": "dist"
+			}
+		},
+		{
+			"name": "config_profile",
+			"displayName": "config_profile",
+			"generator": "Ninja",
+			"binaryDir": "build",
+			"cacheVariables": {
+				"CMAKE_BUILD_TYPE": "RelWithDebInfo",
+				"CMAKE_INSTALL_PREFIX": "dist"
+			}
+		}
+	],
+	"buildPresets": [
+		{
+			"name": "build_debug",
+			"configurePreset": "config_debug"
+		},
+		{
+			"name": "build_release",
+			"configurePreset": "config_release"
+		},
+		{
+			"name": "build_profile",
+			"configurePreset": "config_profile"
+		}
+	]
+}
