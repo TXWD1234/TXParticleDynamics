@@ -7,6 +7,7 @@ include("${libs}/TXLib/add_txlib.cmake")
 
 project(TXProject)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_VERIFY_INTERFACE_HEADER_SETS ON)
 
 # install
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -19,10 +20,9 @@ endif()
 tx_add_txlib(
 	LOCAL_DIR
 		/home/TX_Jerry/Programming/dev/libs/TXLib
+	BUILD_DIR
+		./build
 )
-set(CMakeUtils "${TXLib_SOURCE_DIR}/TXCMakeUtils")
-include("${CMakeUtils}/optimization.cmake")
-include("${CMakeUtils}/link_dir_to_bin.cmake")
 
 add_executable(TXProject 
 	"${src}/main.cpp"
@@ -43,13 +43,17 @@ target_link_libraries(TXProject PRIVATE
 )
 
 # optimization
-tx_add_release_ops(TXProject)
+include("${TXLib_SOURCE_DIR}/cmake/set_compile_flags.cmake")
+tx_set_compile_flags(TXProject PRIVATE)
 
 # build
 set_target_properties(TXProject PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY_DEBUG   "${CMAKE_BINARY_DIR}/bin"
 	RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
 )
+
+# executable environment
+include("${TXLib_SOURCE_DIR}/cmake/link_dir_to_bin.cmake")
 tx_link_dir_to_bin(TXProject "${CMAKE_SOURCE_DIR}/assets")
 
 install(TARGETS TXProject

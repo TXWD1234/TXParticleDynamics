@@ -7,5 +7,7 @@
 			"path": "/home/TX_Jerry/Programming/dev/libs/TXLib"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"cmake.sourceDirectory": "${workspaceFolder:TXParticleDynamics}"
+  }
 }
