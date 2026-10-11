@@ -76,9 +76,9 @@ private:
 		glfwSwapInterval(0); // turn off vsync
 
 		re.init();
-		rr = re.createSectionProxy(re::readShaderSource("vertex.vert"), re::readShaderSource("fragment.frag"));
-
-
+		rr = re.createSectionProxy(
+		    re::readShaderSource("circle.vert"),
+		    re::readShaderSource("circle.frag"));
 
 		return 1;
 	}
@@ -89,8 +89,12 @@ private:
 	void update() {
 	}
 	void render() {
-		rr.drawSprite(tx::Origin, 0, 0.0f);
+
 		re.draw();
+	}
+
+	void drawCircle_impl(tx::vec2 pos, float radius) {
+		rr.drawSprite(pos, 0, 0.0f, { radius * 0.5f, radius * 0.5f });
 	}
 };
 
