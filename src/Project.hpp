@@ -1,8 +1,5 @@
 #pragma once
-#include "impl/geometry.hpp"
-#include "tx/foundation.h"
-#include "tx/data.h"
-#include "tx/graphics.h"
+#include "tx/math.h"
 #include <bits/stdc++.h>
 #include <cmath>
 
@@ -27,8 +24,8 @@ struct EngineParameters {
 	u32 maxEntityCount = 10000;
 	struct Config {
 		f32 ObjectRadius = 0.008f;
-		f32 Gravity = 0.00002f;
-		f32 Friction = 0.9998f;
+		f32 Gravity = 0.0001f;
+		f32 Friction = 0.999f;
 		f32 Restitution = 0.9f;
 	} config;
 };
@@ -46,11 +43,7 @@ public:
 	// ################ Main Loop Interface ################
 
 	void update() {
-		for (u32 i = 0; i < 1; i++) {
-			updateGravity_impl();
-			updateObject_impl();
-			updateCollision_impl();
-		}
+		update_impl(8);
 	}
 
 	template <std::invocable<const std::span<vec2>> Func>
@@ -119,6 +112,15 @@ private:
 private:
 	// ################ Logic Implementation ################
 
+	void update_impl(u32 substep) {
+		f32 dt = 1.0f / static_cast<f32>(substep);
+		while (substep--) {
+			updateGravity_impl(dt);
+			updateObject_impl();
+			updateCollision_impl();
+		}
+	}
+
 	// ================ Update Verlet ================
 
 	void updateObject_impl() {
@@ -131,9 +133,9 @@ private:
 
 	// ================ Update Gravity ================
 
-	void updateGravity_impl() {
+	void updateGravity_impl(f32 dt) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			m_data.pos[i] += tx::unify(tx::Origin - m_data.pos[i]) * m_config.Gravity;
+			m_data.pos[i] += tx::unify(tx::Origin - m_data.pos[i]) * m_config.Gravity * dt;
 		}
 	}
 
@@ -141,7 +143,7 @@ private:
 
 	void updateCollision_impl() {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			for (u32 j = i; j < m_state.objectCount; j++) {
+			for (u32 j = i + 1; j < m_state.objectCount; j++) {
 				if (isColliding(i, j))
 					solveCollision_impl(i, j);
 			}

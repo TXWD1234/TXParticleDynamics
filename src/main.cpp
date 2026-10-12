@@ -2,11 +2,8 @@
 #include "impl/geometry.hpp"
 #include "impl/utility/rgb.hpp"
 #include "utility.hpp"
-#include "tx/json.h"
-#include "tx/type_traits.hpp"
 #include <GLFW/glfw3.h>
 #include <random>
-#include <string_view>
 #include <iostream>
 
 class Application {
@@ -87,10 +84,14 @@ private:
 		    re::readShaderSource("circle.frag"));
 
 		std::mt19937 rng(std::random_device{}());
-		std::uniform_real_distribution<tx::f32> dist(-1.0f, 1.0f);
+		std::uniform_real_distribution<tx::f32> posDist(-1.0f, 1.0f);
+		std::uniform_real_distribution<tx::f32> velDist(-0.001f, 0.001f);
 
-		for (tx::u32 i = 0; i < 5000; i++) {
-			engine.createObject({ dist(rng), dist(rng) });
+		// for (tx::u32 i = 0; i < 2000; i++) {
+		// 	engine.createObject(tx::Origin, { velDist(rng), velDist(rng) });
+		// }
+		for (tx::u32 i = 0; i < 2000; i++) {
+			engine.createObject({ posDist(rng), posDist(rng) });
 		}
 
 		// engine.createObject({ 1.0f, 1.0f });
@@ -118,8 +119,9 @@ private:
 				std::fill(attribs.textureIndexBuffer.begin(), attribs.textureIndexBuffer.end(), 0);
 				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(), tx::vec2{ 0.016f, 0.016f });
 				std::fill(attribs.rotationBuffer.begin(), attribs.rotationBuffer.end(), re::mat2{});
-				std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.begin() + 5000, tx::White.compress());
-				std::fill(attribs.colorBuffer.begin() + 5000, attribs.colorBuffer.end(), tx::Red.compress());
+				//std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.begin() + 5000, tx::White.compress());
+				//std::fill(attribs.colorBuffer.begin() + 5000, attribs.colorBuffer.end(), tx::Red.compress());
+				std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.end(), tx::White.compress());
 			});
 		});
 		re.draw();
