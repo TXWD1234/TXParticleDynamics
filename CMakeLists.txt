@@ -48,8 +48,7 @@ tx_set_compile_flags(TXProject PRIVATE)
 
 # build
 set_target_properties(TXProject PROPERTIES
-	RUNTIME_OUTPUT_DIRECTORY_DEBUG   "${CMAKE_BINARY_DIR}/bin"
-	RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
 # executable environment

@@ -3,13 +3,11 @@
 
 # Performance Profile
 **Substep 8:**
-- 500 object
-- 90 average FPS
-
-**Substep 1:**
-- 1500 object
-- 120 average FPS
+- 7500 object
+- 200 average fps
 
 # Screenshot
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot1.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot2.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot3.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot4.png)

@@ -154,9 +154,17 @@ Suffices to say that, this is a functional Particle Physics Engine already.
 
 ### Testing Result
 Substep 8:
-500 object
-90 average FPS
+- 500 object
+- 90 average FPS
 
 Substep 1:
-1500 object
-120 average FPS
+- 1500 object
+- 120 average FPS
+
+## 2026-10-11 22:52:02:<br>Category: Development Report<br>Topic: Drastical Performance Increase
+*Uhhh so I just found out that this entire time I've been benchmarking the program was compiled in debug mode.*
+In release build, the performance profile was shocking:
+
+Substep 1:
+- 7500 object
+- 200 average FPS

@@ -26,7 +26,7 @@ namespace ParticleDynamics {
 struct EngineParameters {
 	u32 maxEntityCount = 10000;
 	struct Config {
-		f32 ObjectRadius = 0.01f;
+		f32 ObjectRadius = 0.008f;
 		f32 Gravity = 0.00001f;
 		f32 Friction = 0.9998f;
 		f32 Restitution = 0.9f;

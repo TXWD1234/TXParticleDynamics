@@ -82,8 +82,8 @@ private:
 		    re::readShaderSource("circle.frag"));
 
 		tx::u32 count = 0;
-		for (tx::f32 i = -0.8; i < 0.8f; i += 0.042f) {
-			for (tx::f32 j = -0.8; j < 0.8f; j += 0.042f) {
+		for (tx::f32 i = -1.0f; i < 1.0f; i += 0.023f) {
+			for (tx::f32 j = -1.0f; j < 1.0f; j += 0.023f) {
 				engine.createObject(tx::vec2{ i, j });
 				count++;
 			}
@@ -110,7 +110,7 @@ private:
 				std::copy(pos.begin(), pos.end(), attribs.positionBuffer.begin());
 				std::fill(attribs.textureHandleBuffer.begin(), attribs.textureHandleBuffer.end(), 0);
 				std::fill(attribs.textureIndexBuffer.begin(), attribs.textureIndexBuffer.end(), 0);
-				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(), tx::vec2{ 0.02f, 0.02f });
+				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(), tx::vec2{ 0.016f, 0.016f });
 				std::fill(attribs.rotationBuffer.begin(), attribs.rotationBuffer.end(), re::mat2{});
 				std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.end(), tx::White.compress());
 			});
