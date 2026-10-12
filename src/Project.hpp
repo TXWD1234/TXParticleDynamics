@@ -27,7 +27,7 @@ struct EngineParameters {
 	u32 maxEntityCount = 10000;
 	struct Config {
 		f32 ObjectRadius = 0.008f;
-		f32 Gravity = 0.00001f;
+		f32 Gravity = 0.00002f;
 		f32 Friction = 0.9998f;
 		f32 Restitution = 0.9f;
 	} config;
@@ -62,11 +62,20 @@ public:
 public:
 	// ################ Public Interface ################
 
-	u32 createObject(vec2 pos) {
+	u32 createObject(vec2 pos, vec2 initVel = tx::Origin) {
 		m_data.pos[m_state.objectCount] = pos;
-		m_data.prevPos[m_state.objectCount] = pos;
+		m_data.prevPos[m_state.objectCount] = pos - initVel;
 		m_state.objectCount++;
 		return m_state.objectCount - 1;
+	}
+
+	void applyImpulse(vec2 pos, f32 radius, f32 intensity) {
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			if (isColliding(m_data.pos[i], pos, radius)) {
+				vec2 nuv = tx::unify(m_data.pos[i] - pos);
+				m_data.pos[i] += nuv * intensity;
+			}
+		}
 	}
 
 private:
@@ -99,10 +108,12 @@ private:
 private:
 	// ################ Logic Utility ################
 
+	bool isColliding(vec2 a, vec2 b, f32 dist) {
+		return sq(a.x - b.x) + sq(a.y - b.y) < sq(dist);
+	}
 	bool isColliding(u32 a, u32 b) {
-		return sq(m_data.pos[a].x - m_data.pos[b].x) +
-		           sq(m_data.pos[a].y - m_data.pos[b].y) <
-		       sq(m_config.ObjectRadius * 2);
+		return isColliding(m_data.pos[a], m_data.pos[b],
+		                   m_config.ObjectRadius * 2);
 	}
 
 private:

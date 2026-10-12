@@ -4,6 +4,8 @@
 #include "utility.hpp"
 #include "tx/json.h"
 #include "tx/type_traits.hpp"
+#include <GLFW/glfw3.h>
+#include <random>
 #include <string_view>
 #include <iostream>
 
@@ -65,6 +67,9 @@ private:
 	void onKeyEvent(GLFWwindow* window, int key, int scancode, int action, int mods) {
 		if (action == GLFW_PRESS || action == GLFW_REPEAT) {
 			switch (key) {
+			case GLFW_KEY_SPACE:
+				engine.createObject(tx::vec2{ 2.0f, 2.0f }, tx::vec2{ -0.2f, -0.2f });
+				break;
 			}
 		}
 	}
@@ -81,15 +86,13 @@ private:
 		    re::readShaderSource("circle.vert"),
 		    re::readShaderSource("circle.frag"));
 
-		tx::u32 count = 0;
-		for (tx::f32 i = -1.0f; i < 1.0f; i += 0.023f) {
-			for (tx::f32 j = -1.0f; j < 1.0f; j += 0.023f) {
-				engine.createObject(tx::vec2{ i, j });
-				count++;
-			}
+		std::mt19937 rng(std::random_device{}());
+		std::uniform_real_distribution<tx::f32> dist(-1.0f, 1.0f);
+
+		for (tx::u32 i = 0; i < 5000; i++) {
+			engine.createObject({ dist(rng), dist(rng) });
 		}
 
-		std::cout << count << '\n';
 		// engine.createObject({ 1.0f, 1.0f });
 		// engine.createObject({ -1.0f, -1.0f });
 
@@ -102,6 +105,9 @@ private:
 	tx::ParticleDynamics::Engine engine;
 
 	void update() {
+		if (glfwGetMouseButton(framework.getWindow(), GLFW_MOUSE_BUTTON_LEFT)) {
+			engine.applyImpulse(tx::glfwGetCursorPos(framework.getWindow()), 0.4f, 0.001f);
+		}
 		engine.update();
 	}
 	void render() {
@@ -112,7 +118,8 @@ private:
 				std::fill(attribs.textureIndexBuffer.begin(), attribs.textureIndexBuffer.end(), 0);
 				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(), tx::vec2{ 0.016f, 0.016f });
 				std::fill(attribs.rotationBuffer.begin(), attribs.rotationBuffer.end(), re::mat2{});
-				std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.end(), tx::White.compress());
+				std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.begin() + 5000, tx::White.compress());
+				std::fill(attribs.colorBuffer.begin() + 5000, attribs.colorBuffer.end(), tx::Red.compress());
 			});
 		});
 		re.draw();
