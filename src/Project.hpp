@@ -1,4 +1,169 @@
 #pragma once
-#include "tx/txlib.h"
+#include "impl/geometry.hpp"
+#include "tx/foundation.h"
+#include "tx/data.h"
+#include "tx/graphics.h"
 #include <bits/stdc++.h>
+#include <cmath>
 
+namespace tx {
+
+// ################################################
+// $$$$$$$$$$$$$$$$ Infrasturcture $$$$$$$$$$$$$$$$
+// ################################################
+
+inline f32 hypot(vec2 v) { return std::hypot(v.x, v.y); }
+
+
+namespace ParticleDynamics {
+// ########################################
+// $$$$$$$$$$$$$$$$ Engine $$$$$$$$$$$$$$$$
+// ########################################
+/**
+ * WE LOVE VERLET
+ */
+
+struct EngineParameters {
+	u32 maxEntityCount = 10000;
+	struct Config {
+		f32 ObjectRadius = 0.01f;
+		f32 Gravity = 0.00001f;
+		f32 Friction = 0.9998f;
+		f32 Restitution = 0.9f;
+	} config;
+};
+
+
+class Engine {
+public:
+	Engine(EngineParameters param = EngineParameters{})
+	    : m_data(
+	          std::vector<vec2>(param.maxEntityCount),
+	          std::vector<vec2>(param.maxEntityCount)),
+	      m_config(param.config) {}
+
+public:
+	// ################ Main Loop Interface ################
+
+	void update() {
+		for (u32 i = 0; i < 1; i++) {
+			updateGravity_impl();
+			updateObject_impl();
+			updateCollision_impl();
+		}
+	}
+
+	template <std::invocable<const std::span<vec2>> Func>
+	void draw(Func&& f) {
+		f(std::span(m_data.pos.begin(),
+		            m_data.pos.begin() + m_state.objectCount));
+	}
+
+public:
+	// ################ Public Interface ################
+
+	u32 createObject(vec2 pos) {
+		m_data.pos[m_state.objectCount] = pos;
+		m_data.prevPos[m_state.objectCount] = pos;
+		m_state.objectCount++;
+		return m_state.objectCount - 1;
+	}
+
+private:
+	// ################ Runtime Data ################
+
+	struct Data_impl {
+		/**
+		 * Everything is going to be in an arena in the future, but for this
+		 * prototype, std::vector is fine
+		 */
+		std::vector<vec2> pos;
+		std::vector<vec2> prevPos;
+	} m_data;
+
+	struct State_impl {
+		u32 objectCount = 0;
+	} m_state;
+
+	EngineParameters::Config m_config;
+
+private:
+	// ################ Implementation Utility ################
+
+	vec2 findVel_impl(u32 id) {
+		return m_data.pos[id] - m_data.prevPos[id];
+	}
+
+
+
+private:
+	// ################ Logic Utility ################
+
+	bool isColliding(u32 a, u32 b) {
+		return sq(m_data.pos[a].x - m_data.pos[b].x) +
+		           sq(m_data.pos[a].y - m_data.pos[b].y) <
+		       sq(m_config.ObjectRadius * 2);
+	}
+
+private:
+	// ################ Logic Implementation ################
+
+	// ================ Update Verlet ================
+
+	void updateObject_impl() {
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			vec2 vel = findVel_impl(i);
+			m_data.prevPos[i] = m_data.pos[i];
+			m_data.pos[i] += vel * m_config.Friction;
+		}
+	}
+
+	// ================ Update Gravity ================
+
+	void updateGravity_impl() {
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			m_data.pos[i] += tx::unify(tx::Origin - m_data.pos[i]) * m_config.Gravity;
+		}
+	}
+
+	// ================ Update Collision ================
+
+	void updateCollision_impl() {
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			for (u32 j = i; j < m_state.objectCount; j++) {
+				if (isColliding(i, j))
+					solveCollision_impl(i, j);
+			}
+		}
+	}
+	// Collision Solver, the core physics logic
+	void solveCollision_impl(u32 a, u32 b) {
+		vec2 diff = m_data.pos[a] - m_data.pos[b];
+		f32 dist = tx::hypot(diff);
+		vec2 nuv = tx::unify(diff, dist);
+
+		// push apart
+		f32 overlap = (m_config.ObjectRadius * 2 - dist) * 0.5f;
+		vec2 push = overlap * nuv;
+
+		m_data.pos[a] += push;
+		m_data.pos[b] -= push;
+
+		// calculate impulse
+		vec2 relVel = findVel_impl(a) - findVel_impl(b); // relative velocity
+		f32 nRelVel = dot(relVel, nuv);
+
+		if (nRelVel >= 0.0f) return;
+
+		// solve bounce
+		float bounceImpulse = nRelVel * m_config.Restitution;
+		vec2 impulseVec = nuv * bounceImpulse;
+		m_data.prevPos[a] += impulseVec;
+		m_data.prevPos[b] -= impulseVec;
+	}
+};
+
+
+
+} // namespace ParticleDynamics
+} // namespace tx

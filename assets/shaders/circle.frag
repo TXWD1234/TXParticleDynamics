@@ -22,7 +22,10 @@ void main() {
             //FragColor = unpackUnorm4x8(colorTint);
 
 			float dist = distance(position, center);
-    		float alpha = 1.0 - smoothstep(radius * 0.989, radius * 1.01, dist);
+    		//float alpha = 1.0 - smoothstep(radius * 0.989, radius * 1.01, dist);
+			
+			float delta = fwidth(dist);
+			float alpha = 1.0 - smoothstep(radius - delta, radius + delta, dist);
 
 			FragColor = unpackUnorm4x8(colorTint);
     		FragColor.w = alpha;

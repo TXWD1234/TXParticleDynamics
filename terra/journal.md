@@ -123,3 +123,40 @@ Apart from the flawed result, I actually think the design of the algorithm is pr
 Finally, I want to conclude this report with the lesson I've learned: always examine the algorithm thoroughly before putting real effort to it.
 But to be fair, it is actually not too late, since I made the incredible correct decision of writing the documentation first before actually implementing the algorithm, which takes much more effort.
 *Another lesson is to tell myself to stop when I feel like the algorithm is getting way too complex.*
+
+## 2026-10-11 16:31:56:<br>Category: Development Report<br>Topic: TXLib: TXData: Overlay Pattern: Refinement to previous architecture and Bug fixes
+- Add OverlayBaseIntrinsicsAccessor to grant OverlayAlias access to intrinsics of any OverlayBase
+- Add Reallocation Policy to buffer_trait for OverlayBufferExpansionResize and OverlayMMW's copy semantics to respect custom constraint of buffer, such as pow2
+- Fix OverlayMMW passing `TArgs` entirely into Overlay without taking out the allocator arguemnt at the end
+- Fix `s.self()` ambiguity in CRTP interface helpers's deducting this functions
+- Unify Allocator representation across components: store as value, copy when rebind, reference whenever possible
+- Flatten the `overlaySetBufferState` call in `OverlayMMW::copyReallocate_impl` to fix size value stale bug
+- Various of other small bug fixes
+
+## 2026-10-11 21:32:37:<br>Category: Development Report<br>Topic: Implement Draw Circle
+*It's been a while since the last time I did anything regarding rendering, so there are a lot things I need to pick up.*
+The logic of drawing circle with GPU is quite elegant. You act like you are drawing a square, passing teh ordinary 4 vertices to the vertex shader (which process every single vertex of the mesh) as usual. This made the API for draw normal sprites and circles uniform. And then in the fragment shader (which process every single pixel in the range of the vertices), you calculate the distance between that pixel and the center of the circle, scale the alpha value with the distance where (conceptually) any pixel that has distance bigger then the radius become transparent.
+*I was really trying to explain...*
+The shaders are the essence of this entire logic. And that's exactly what was implemented in this report.
+
+## 2026-10-11 21:40:38:<br>Category: Development Report<br>Topic: Implement Basic Solver
+*Because the "MVP" requirement to submit, this task was pulled from the schedule and granted maximum priority...*
+This is the humble beginning of the master piece.
+The Basic components are implemented, including:
+- Verlet Solver
+- Gravity Solver
+- Collision Solver
+And foundational components such as SoA data structure and Engine Interface are all introduced.
+Suffices to say that, this is a functional Particle Physics Engine already.
+
+*It is actually very incredible I can complete this in this few hours. I was expecting a much harder route getting here, given that the first time me making the physics engine took me an entire month to figure out the logic.*
+*But it's actually pretty reasonable. I am building this standing on top of the sholder of a giant. Obviously that giant is me, of course.*
+
+### Testing Result
+Substep 8:
+500 object
+90 average FPS
+
+Substep 1:
+1500 object
+120 average FPS
