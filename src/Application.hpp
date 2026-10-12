@@ -91,19 +91,8 @@ private:
 		    re::readShaderSource("circle.vert"),
 		    re::readShaderSource("circle.frag"));
 
-		std::mt19937 rng(std::random_device{}());
-		std::uniform_real_distribution<tx::f32> posDist(-1.0f, 1.0f);
-		std::uniform_real_distribution<tx::f32> velDist(-0.001f, 0.001f);
-
-		// for (tx::u32 i = 0; i < 2000; i++) {
-		// 	engine.createObject(tx::Origin, { velDist(rng), velDist(rng) });
-		// }
-		for (tx::u32 i = 0; i < 2000; i++) {
-			engine.createObject({ posDist(rng), posDist(rng) });
-		}
-
-		// engine.createObject({ 1.0f, 1.0f });
-		// engine.createObject({ -1.0f, -1.0f });
+		lua = LuaApplication("demo/basic", engine);
+		lua.init();
 
 		return 1;
 	}
@@ -112,11 +101,10 @@ private:
 	re::RSP rr;
 
 	tx::ParticleDynamics::Engine engine;
+	LuaApplication lua;
 
 	void update() {
-		if (glfwGetMouseButton(framework.getWindow(), GLFW_MOUSE_BUTTON_LEFT)) {
-			engine.applyImpulse(tx::glfwGetCursorPos(framework.getWindow()), 0.4f, 0.001f);
-		}
+		lua.runtime();
 		engine.update();
 	}
 	void render() {
