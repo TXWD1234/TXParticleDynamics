@@ -166,7 +166,7 @@ private:
 		vec2 relVel = findVel_impl(a) - findVel_impl(b); // relative velocity
 		f32 nRelVel = dot(relVel, nuv);
 
-		if (nRelVel >= 0.0f) return;
+		if (nRelVel >= -0.0001f) return;
 
 		// solve bounce
 		float bounceImpulse = nRelVel * m_config.Restitution;

@@ -14,7 +14,7 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "Install prefix to ~/.local" FORCE)
 endif()
 
-# dependencies
+# Dependencies
 
 # TXLib
 tx_add_txlib(
@@ -24,14 +24,24 @@ tx_add_txlib(
 		./build
 )
 
+# Lua and sol2
+find_package(Lua 5.4 EXACT REQUIRED)
+add_subdirectory(${CMAKE_SOURCE_DIR}/libs/sol2)
+
+# Project
+
 add_executable(TXProject 
 	"${src}/main.cpp"
 	"${src}/Project.hpp"
+	"${src}/Application.hpp"
+	"${src}/lua_application.hpp"
+	"${src}/lua_application.cpp"
 )
 target_include_directories(TXProject PRIVATE 
 	"${CMAKE_SOURCE_DIR}"
 	"${libs}"
 	"${src}"
+	${LUA_INCLUDE_DIR}
 )
 
 # project settings
@@ -40,6 +50,8 @@ target_compile_features(TXProject PUBLIC cxx_std_23)
 # dependencies
 target_link_libraries(TXProject PRIVATE
 	TXLib
+	${LUA_LIBRARIES}
+	sol2::sol2
 )
 
 # optimization
