@@ -72,9 +72,6 @@ private:
 	void onKeyEvent(GLFWwindow* window, int key, int scancode, int action, int mods) {
 		if (action == GLFW_PRESS || action == GLFW_REPEAT) {
 			switch (key) {
-			case GLFW_KEY_SPACE:
-				engine.createObject(tx::vec2{ 2.0f, 2.0f }, tx::vec2{ -0.2f, -0.2f });
-				break;
 			}
 		}
 	}
@@ -91,7 +88,8 @@ private:
 		    re::readShaderSource("circle.vert"),
 		    re::readShaderSource("circle.frag"));
 
-		lua = LuaApplication("demo/basic", engine);
+		lua = LuaApplication("demo/explosion", engine);
+		lua.configure();
 		lua.init();
 
 		return 1;
@@ -113,7 +111,8 @@ private:
 				std::copy(pos.begin(), pos.end(), attribs.positionBuffer.begin());
 				std::fill(attribs.textureHandleBuffer.begin(), attribs.textureHandleBuffer.end(), 0);
 				std::fill(attribs.textureIndexBuffer.begin(), attribs.textureIndexBuffer.end(), 0);
-				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(), tx::vec2{ 0.016f, 0.016f });
+				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(),
+				          tx::vec2{ engine.m_config.ObjectRadius * 2, engine.m_config.ObjectRadius * 2 });
 				std::fill(attribs.rotationBuffer.begin(), attribs.rotationBuffer.end(), re::mat2{});
 				//std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.begin() + 5000, tx::White.compress());
 				//std::fill(attribs.colorBuffer.begin() + 5000, attribs.colorBuffer.end(), tx::Red.compress());

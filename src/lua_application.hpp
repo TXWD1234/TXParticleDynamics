@@ -18,6 +18,7 @@ public:
 
 public:
 	// ================ Public Interface ================
+	void configure();
 	void init();
 	void runtime();
 
@@ -28,6 +29,8 @@ private:
 	std::filesystem::path m_path;
 	tx::ParticleDynamics::Engine* m_engine = nullptr;
 
+
 	void init_impl();
 	void exposeEngine_impl();
+	void exposeEngineConfig_impl();
 };

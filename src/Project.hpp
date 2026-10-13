@@ -20,30 +20,34 @@ namespace ParticleDynamics {
  * WE LOVE VERLET
  */
 
+// all configuration that are required to construct the engine
 struct EngineParameters {
-	u32 maxEntityCount = 10000;
-	struct Config {
-		f32 ObjectRadius = 0.008f;
-		f32 Gravity = 0.0001f;
-		f32 Friction = 0.999f;
-		f32 Restitution = 0.9f;
-	} config;
+	u32 MaxEntityCount = 10000;
+	u32 SubstepCount = 8;
+};
+// all configuration that are not required to construct the engine
+struct EngineConfig {
+	f32 ObjectRadius = 0.008f;
+	f32 Gravity = 0.0001f;
+	f32 Friction = 0.999f;
+	f32 Restitution = 0.9f;
 };
 
 
 class Engine {
 public:
-	Engine(EngineParameters param = EngineParameters{})
+	Engine() = default;
+	Engine(EngineParameters param, EngineConfig config)
 	    : m_data(
-	          std::vector<vec2>(param.maxEntityCount),
-	          std::vector<vec2>(param.maxEntityCount)),
-	      m_config(param.config) {}
+	          std::vector<vec2>(param.MaxEntityCount),
+	          std::vector<vec2>(param.MaxEntityCount)),
+	      SubstepCount(param.SubstepCount), m_config(config) {}
 
 public:
 	// ################ Main Loop Interface ################
 
 	void update() {
-		update_impl(8);
+		update_impl(SubstepCount);
 	}
 
 	template <std::invocable<const std::span<vec2>> Func>
@@ -87,7 +91,10 @@ private:
 		u32 objectCount = 0;
 	} m_state;
 
-	EngineParameters::Config m_config;
+	u32 SubstepCount;
+
+public:
+	EngineConfig m_config;
 
 private:
 	// ################ Implementation Utility ################
