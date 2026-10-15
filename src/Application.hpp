@@ -2,14 +2,13 @@
 
 #pragma once
 #include "Project.hpp"
+#include "render_engine.hpp"
 #include "lua_application.hpp"
-
+#include "utility.hpp"
 #include "impl/geometry.hpp"
 #include "impl/utility/rgb.hpp"
-#include "utility.hpp"
-#include <GLFW/glfw3.h>
-#include <random>
 #include <iostream>
+#include <utility>
 
 class Application {
 private:
@@ -83,47 +82,32 @@ private:
 		stbi_set_flip_vertically_on_load(true);
 		glfwSwapInterval(0); // turn off vsync
 
-		re.init();
-		rr = re.createSectionProxy(
-		    re::readShaderSource("circle.vert"),
-		    re::readShaderSource("circle.frag"));
-
-		lua = LuaApplication("demo/explosion", engine);
-		lua.configure();
+		lua = tx::ParticleDynamics::LuaApplication(
+		    "demo/galaxy-2");
+		lua.configure([this](tx::ParticleDynamics::LuaApplication::EngineArg engineArg,
+		                     tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
+		                  -> tx::ParticleDynamics::EngineCollection {
+			engine = tx::ParticleDynamics::Engine(engineArg.param, engineArg.config);
+			re.init(reArg.param, reArg.config);
+			return { &engine, &re };
+		});
 		lua.init();
 
 		return 1;
 	}
 
-	re::RE re;
-	re::RSP rr;
+
 
 	tx::ParticleDynamics::Engine engine;
-	LuaApplication lua;
+	tx::ParticleDynamics::RenderEngine re;
+	tx::ParticleDynamics::LuaApplication lua;
 
 	void update() {
 		lua.runtime();
 		engine.update();
 	}
 	void render() {
-		engine.draw([this](std::span<tx::vec2> pos) {
-			rr.drawSprites(pos.size(), [&](re::Renderer::SpriteAtrribs& attribs) {
-				std::copy(pos.begin(), pos.end(), attribs.positionBuffer.begin());
-				std::fill(attribs.textureHandleBuffer.begin(), attribs.textureHandleBuffer.end(), 0);
-				std::fill(attribs.textureIndexBuffer.begin(), attribs.textureIndexBuffer.end(), 0);
-				std::fill(attribs.scaleBuffer.begin(), attribs.scaleBuffer.end(),
-				          tx::vec2{ engine.m_config.ObjectRadius * 2, engine.m_config.ObjectRadius * 2 });
-				std::fill(attribs.rotationBuffer.begin(), attribs.rotationBuffer.end(), re::mat2{});
-				//std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.begin() + 5000, tx::White.compress());
-				//std::fill(attribs.colorBuffer.begin() + 5000, attribs.colorBuffer.end(), tx::Red.compress());
-				std::fill(attribs.colorBuffer.begin(), attribs.colorBuffer.end(), tx::White.compress());
-			});
-		});
-		re.draw();
-	}
-
-	void drawCircle_impl(tx::vec2 pos, float radius) {
-		rr.drawSprite(pos, 0, 0.0f, { radius * 0.5f, radius * 0.5f });
+		engine.draw([this](std::span<tx::vec2> _) { re.draw(_); });
 	}
 };
 
