@@ -1,24 +1,21 @@
+// Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
+
 #pragma once
+#include "impl/geom_utils.hpp"
+#include "impl/geometry.hpp"
+#include "infrastructure.hpp"
 #include "tx/math.h"
 #include <bits/stdc++.h>
 #include <cmath>
 
-namespace tx {
-
-// ################################################
-// $$$$$$$$$$$$$$$$ Infrasturcture $$$$$$$$$$$$$$$$
-// ################################################
-
-inline f32 hypot(vec2 v) { return std::hypot(v.x, v.y); }
-
-
-namespace ParticleDynamics {
 // ########################################
 // $$$$$$$$$$$$$$$$ Engine $$$$$$$$$$$$$$$$
 // ########################################
 /**
  * WE LOVE VERLET
  */
+
+namespace tx::ParticleDynamics {
 
 // all configuration that are required to construct the engine
 struct EngineParameters {
@@ -75,6 +72,16 @@ public:
 		}
 	}
 
+	// default to clock-wise. set magnitude to negative for counter-clockwise
+	void applyRotationalForce(f32 magnitude, vec2 center = tx::Origin) {
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			applyVel_impl(
+			    i, tx::rightPerp(
+			           tx::unify(center - m_data.pos[i])) *
+			           magnitude);
+		}
+	}
+
 private:
 	// ################ Runtime Data ################
 
@@ -102,7 +109,9 @@ private:
 	vec2 findVel_impl(u32 id) {
 		return m_data.pos[id] - m_data.prevPos[id];
 	}
-
+	void applyVel_impl(u32 id, vec2 vel) {
+		m_data.prevPos[id] -= vel;
+	}
 
 
 private:
@@ -185,5 +194,4 @@ private:
 
 
 
-} // namespace ParticleDynamics
-} // namespace tx
+} // namespace tx::ParticleDynamics

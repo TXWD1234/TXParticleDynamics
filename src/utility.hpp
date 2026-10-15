@@ -1,3 +1,6 @@
+// Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
+
+#pragma once
 #include <filesystem>
 #include "tx/graphics.h"
 #include "tx/resource.h"
