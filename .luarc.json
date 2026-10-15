@@ -1,0 +1,21 @@
+{
+    "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
+    "runtime": {
+        "version": "Lua 5.4",
+        "builtin": {
+            "basic": "default",
+            "math": "default",
+            "string": "default",
+            "io": "disable",
+            "os": "disable",
+            "table": "disable",
+            "coroutine": "disable",
+            "debug": "disable",
+            "utf8": "disable",
+            "package": "disable"
+        }
+    },
+    "workspace": {
+        "checkThirdParty": false
+    }
+}

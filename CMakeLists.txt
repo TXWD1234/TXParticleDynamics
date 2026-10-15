@@ -36,6 +36,8 @@ add_executable(TXProject
 	"${src}/Application.hpp"
 	"${src}/lua_application.hpp"
 	"${src}/lua_application.cpp"
+	"${src}/infrastructure.hpp"
+	"${src}/render_engine.hpp"
 )
 target_include_directories(TXProject PRIVATE 
 	"${CMAKE_SOURCE_DIR}"
