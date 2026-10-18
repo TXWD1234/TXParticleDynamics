@@ -4,7 +4,6 @@
 #include "impl/allocator.hpp"
 #include "impl/basic_storage.hpp"
 #include "impl/data_utils.hpp"
-#include "impl/geometry.hpp"
 #include "tx/type_traits.hpp"
 #include <concepts>
 #include <atomic>
@@ -18,8 +17,6 @@
 // ################################################
 
 namespace tx {
-
-inline f32 hypot(vec2 v) { return std::hypot(v.x, v.y); }
 
 // =============================================
 // **************** Concurrency ****************
@@ -255,6 +252,18 @@ private:
 	SPSCQueue<Task, Allocator> m_queue;
 	std::thread m_thread;
 };
+
+
+// =============================================
+// **************** Grid System ****************
+// =============================================
+
+/**
+ * Using the ZGrid / Z-order curve to accomplish maximum cache locality when
+ * accessing adjacent grids.
+ * Forcing the grid side count to be pow2 for parallel update stability.
+ */
+
 
 
 

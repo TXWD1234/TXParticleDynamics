@@ -66,7 +66,7 @@ public:
 	void applyImpulse(vec2 pos, f32 radius, f32 intensity) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			if (isColliding(m_data.pos[i], pos, radius)) {
-				vec2 nuv = tx::unify(m_data.pos[i] - pos);
+				vec2 nuv = tx::normalize(m_data.pos[i] - pos);
 				m_data.pos[i] += nuv * intensity;
 			}
 		}
@@ -77,7 +77,7 @@ public:
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			applyVel_impl(
 			    i, tx::rightPerp(
-			           tx::unify(center - m_data.pos[i])) *
+			           tx::normalize(center - m_data.pos[i])) *
 			           magnitude);
 		}
 	}
@@ -151,7 +151,7 @@ private:
 
 	void updateGravity_impl(f32 dt) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			m_data.pos[i] += tx::unify(tx::Origin - m_data.pos[i]) * m_config.Gravity * dt;
+			m_data.pos[i] += tx::normalize(tx::Origin - m_data.pos[i]) * m_config.Gravity * dt;
 		}
 	}
 
@@ -168,8 +168,8 @@ private:
 	// Collision Solver, the core physics logic
 	void solveCollision_impl(u32 a, u32 b) {
 		vec2 diff = m_data.pos[a] - m_data.pos[b];
-		f32 dist = tx::hypot(diff);
-		vec2 nuv = tx::unify(diff, dist);
+		f32 dist = tx::length(diff);
+		vec2 nuv = tx::normalize(diff, dist);
 
 		// push apart
 		f32 overlap = (m_config.ObjectRadius * 2 - dist) * 0.5f;

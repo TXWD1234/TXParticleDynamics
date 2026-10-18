@@ -340,3 +340,8 @@ In this update, the infrasturcture of concurrency was implemented.
 Introducing `TaskThread`, a single thread manager capable of storing assigned tasks and execute them sequencially.
 It can accept multiple task functions, although the parameter must be identical, it can be overcomed by making the parameter a union or `std::variant`, or reusing fields of a struct.
 It is optimized for performance, *because of course it is,* using no locks but purely atomic operations.
+
+## 2026-10-18 15:55:52:<br>Category: Development Report<br>Topic: TXLib: TXMath: Geometry Refactor
+Moving on to proper geometry integration such as Grid System, the project cannot continue to rely on the ancient TXMath from a year ago. Several flaws founded before, along with the inefficiency and inperfection of the entire architecture had driven this refactor, and now it is finally the time to do it.
+In this refactor, the entire `vec2` / `Coord` implementation was refactored to the templated `Vec<D, T>` version, the `geom_utils.hpp` utilities are also refactored for correctness and consistency.
+

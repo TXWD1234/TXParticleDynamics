@@ -83,7 +83,7 @@ private:
 		glfwSwapInterval(0); // turn off vsync
 
 		lua = tx::ParticleDynamics::LuaApplication(
-		    "demo/galaxy-2");
+		    "demo/galaxy");
 		lua.configure([this](tx::ParticleDynamics::LuaApplication::EngineArg engineArg,
 		                     tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
 		                  -> tx::ParticleDynamics::EngineCollection {
