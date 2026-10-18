@@ -168,3 +168,175 @@ In release build, the performance profile was shocking:
 Substep 1:
 - 7500 object
 - 200 average FPS
+
+## 2026-10-15 17:14:49:<br>Category: Research Report<br>Topic: Using `sol2` to Integrate Lua
+For performance's sake, a proper engine is almost always written in a compiling language, such as C/C++.
+But the trade off of compiling language is the lack of dynamic testing capability and protability. And that's the entire reason for scripting language to exist.
+Integrating with a scriping language, means that the engine expose a set of API in that language, and grant the script capability of altering the engine's behavior.
+
+It allows external, non-compiling scripts being able to program custom logic with the engine, without re-compiling the entire engine.
+Which means now once the engine is stable, programmer can use scripting language to utilize the engine, without modifying the source code and recompile the entire thing.
+
+---
+Lua is is choosen scripting language of the TXParticleDynamics because how well it could integrate with C++ and how clean it's syntax is. Also for it's absolute performance advantage among other scripting languages.
+*The Lua here is refering to standard Lua, excluding LuaJIT or Luau. It is a weighted decision to omit LuaJIT, because it lacks support of modern lua, and it's performance optimization is negligible in the usage of the engine, in which the lua script never perform heavy computation.*
+
+---
+*The raw C API of lua is very convoluted to use, therefore a wrapper library in this stage is absolutely necessary.*
+`sol2` is the most mature library in the community, heavily utilizing template meta programming to reduce runtime overhead. It is almost the physical limit of the speed for cross boundary lua <-> C++ communication.
+
+### CMake Setup
+*Although sol2 is header only and theoretically be used with only one header, proper CMake setup is still strongly encouraged.*
+First, clone the [offical repository](https://github.com/ThePhD/sol2).
+In CMakeLists.txt:
+```cmake
+find_package(Lua 5.4 EXACT REQUIRED)
+add_subdirectory(${CMAKE_SOURCE_DIR}/libs/sol2)
+
+# add_executable / add_library
+
+target_include_directories(<your-project-name> PRIVATE
+	${LUA_INCLUDE_DIR}
+)
+target_link_libraries(<your-project-name> PRIVATE
+	${LUA_LIBRARIES}
+	sol2::sol2
+)
+```
+*The `find_package(Lua 5.4 EXACT REQUIRED)` was to resist any newer Lua version that sol2 doesn't support.*
+*`<your-project-name>` is the target identifier of the project.*
+
+### Exposing Interface
+#### Basic sol2 API
+The generic inclusion of sol2 resembles the following:
+```cpp
+#define SOL_ALL_SAFETIES_ON 1
+#include "sol/sol.hpp"
+```
+
+To begin, a `sol::state` object must be created. A `sol::state` object represents a running Lua virtual machine. All operations of sol2 involves this state object.
+```cpp
+sol::state lua;
+lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string); // setup the lua standard library is also necessary
+```
+
+To set value of a variable or create a variable:
+```cpp
+lua["variableName"] = <variable-value>
+```
+This semantic supports a various of types, in which they will be automatically converted to it's corresponding lua type.
+It supports all primitive built-in types, strings, pointers, and functions.
+sol2 also provides method for user to define their own types and how those types can be accessed, via `lua.new_usertype`:
+```cpp
+m_impl->lua.new_usertype<tx::ParticleDynamics::EngineParameters>(
+    "EngineParameter",
+    "MaxEntityCount", &tx::ParticleDynamics::EngineParameters::MaxEntityCount,
+    "SubstepCount", &tx::ParticleDynamics::EngineParameters::SubstepCount)
+```
+
+To expose a function, it is exactly the same as if trying to set a variable. Every function can be interpreted as a functor:
+```cpp
+lua["functionName"] = [](){}; // lambda (recommanded)
+lua["functionName"] = std::function<void()>{}; // std::function
+lua["functionName"] = &func; // function pointer
+```
+
+To bind a lua variable with a reference of a C++ variable, use `std::ref`:
+```cpp
+lua["ref"] = std::ref(v);
+```
+This create a "persistent mapping" of that variable in lua, in which it operates exactly like reference in C++, when it's edited on one side it is immediately visible on the other side.
+
+To read a variable, use implicit conversion or use explicit `.get()` function:
+```cpp
+int v = lua["variableName"];
+lua["variableName"].get<int>();
+```
+
+To null a variable (set it's value to `nil` and remove it from it's scope):
+```cpp
+lua["variableName"] = sol::lua_nil;
+```
+
+#### Organizing Interface with Table
+There's no native namespace in Lua. Organizing free functions and globals in a table is the standard practice.
+The syntax of accessing a table is exactly the same as accessing the global state. *It because the entire Lua global scope is intrinsically a giant hash table, no difference then a Lua table instance.*
+To create a table:
+```cpp
+lua["tableName"] = lua.create_table("tableName")
+lua.create_named_table("tableName")
+```
+
+### Creating API Definition for Linters
+Because Lua is dynamically typed, there's no way for the linter to know the API you ingected, therefore you need to explicitly provide it in a separate file.
+This file is a "definition file", it don't perform any actual operations, it is only a hint for the linter to know what field are there.
+*This is called LuaCATS (Lua Comments And Type System).*
+```lua
+---@meta
+-- The ---@meta declares that this file is a definition file
+
+-- define a class type
+---@class MyClass
+---@field value number
+---@field func fun(val: number)
+
+-- define an instance
+---@type MyClass
+obj = {}
+```
+
+### Executing Lua Script
+To directly execute a lua script:
+```cpp
+lua.script("<script>")
+lua.script_file(<file-path>)
+```
+
+But notice that calling script function requires the lua parser to parse it into byte code everytime. For scripts being frequently called, explicitly compile the script once and cache the byte code is vastly superior.
+```cpp
+sol::load_result res = lua.load("script");
+sol::protected_function script;
+
+if (!result.valid()) {
+	// Error
+} else {
+	script = res;
+}
+
+script();
+```
+
+### Compilation Time Concern
+The sol2 library is header only and heavily utilize template meta programming, resulting noticable compilation overhead if included naively.
+To reduce compilation overhead, sol2 should never be included in a header and propagate to the entire codebase.
+Limit sol2 inclusion in cpp files, along with the Pimpl Pattern is the standard practice of sol2 inclusion.
+
+## 2026-10-15 17:16:34:<br>Category: Personal Journal<br>Topic: How I've decided to finally integrate scripting language
+For quite a long time, all the way back to my first physics engine, I always desire some kind of external configuration for my engine that can change it's behavior, so I don't need to compile the entire thing everything I want to test features. I always like to tweak numbers over and over again just to see how things interact under different circumstances, and the rate of me doing it is so frequent that the few seconds of C++ compilation is unbearable.
+At first I made a Json library, hoping I could put my configuration there and only modify that. It did work, but only for a small portion of the demand. The core problem was Json is limited to static values and cannot express logic, thereby forcing me back to C++ when I want to create different demos.
+And I understodd that a Turing Complete language is absolutely necessary to accomplish what I am targeting, so for a long time I was theorycrafting my own scripting language *(What? You think I'm going to trust a random language that I never knew before? What if it's slow? What if it's as horrible as Python?)*, in which I eventually made (Yes I am talking about [TXCSL](https://github.com/TXWD1234/TXCompute/tree/main/Software/components/TXCSL)) and quickly threw away, because I've realized how convoluted making a interpreter is, and how hard it is to make it ***FAST***.
+And eventually I discovered Lua. I noticed it when [hyprland](https://github.com/hyprwm/hyprland) decided to do a massive overhaul of the API and completely switch to Lua for configuration, and I had to desperately watch my Arch installation crashing over and over, while I am urgently having a project to finish, thus miserably forced to use Windows for a few weeks and finished the project, only to come back hopelessly look at the Lua API like it's some kind of alien gibberish.
+*Okay that was over exaggerating, but you get the idea.*
+The time I acknowledge it and really started consider integrating with it was when I noticed that Factorio, the one most performance minded and heavily optimized game I known of all time heavily relies on Lua scripting for all it's content. I was like: "Factorio is trying to be very fast and is indeed very fast, and it uses Lua, so I probably should as well."
+Upon further investigation, I realized that the deal Lua had offered was much better then what I thought. The fact that it is designed to be integrated with C/C++ from the beginning made me really set a preference on the language.
+So while already looking forward to integrating with Lua, I started this TXParticleDynamics project. I immediately identified the demand of a scripting API when I first completed the engine prototype, and decided this would be the best opportunity to integrate it, in which I did.
+Unsurprisingly, Lua had delivered even more surprise the moment I actually get into it. The simplicity and minimalism pursuit of the syntax is one thing that really triggers me; How clean and straight forward using sol2 library to integrate with it is another thing. Also I just love that it produced almost negligible performance overhead despite running 60 times a second.
+And yeah, that's my story with Lua, thank you for reading I guess. *This report was started to be a technical progress report of the recent few days, but I've realized it's getting too personal and geniously change the category to personal journal.*
+
+## 2026-10-16 17:45:39:<br>Category: Development Report<br>Topic: Lua Integration and numerous Post Prototype Refinement
+*Maybe rather then celebrating when a project reaches a major milestone, I should start crying instead. Because I know the following days would be bloated with extremely boring refinement and stress testing. Or maybe I really should celebrate, because I know that those seemingly trivial refinements are practically the most important development stage of the project, and is what actually makes a project from a prototype to a product.*
+
+After the legendary burst of production, which had established the foundation of TXParticleDynamics: The collision solver, what was immediately followed was maintenance issues and accessibility integrations.
+The most major progress made during this update was the introduction of **Lua Integration**. The integration provides a set of APIs exposed to the lua scritping environment and can be called from a script to interfere engine behavior.
+During this update, the substep logic was corrected and delta time integration was adjusted to correct state.
+Some other moderate or minor changes made during this update:
+- Added isometric rendering option
+- Added numerous feature interfaces including `applyImpulse`, `applyRotationalForce`, etc.
+- Numerous demos in was implemented in form of Lua script packs
+
+## 2026-10-18 12:11:26:<br>Category: Development Report<br>Topic: Infrastructure: Concurrency
+Concurrency is one of the most important planned optimization for the engine. Multi-thread execution divides update time almost linearly with the thread count and made exploiting 100% of the CPU's power possible.
+In this update, the infrasturcture of concurrency was implemented.
+Introducing `TaskThread`, a single thread manager capable of storing assigned tasks and execute them sequencially.
+It can accept multiple task functions, although the parameter must be identical, it can be overcomed by making the parameter a union or `std::variant`, or reusing fields of a struct.
+It is optimized for performance, *because of course it is,* using no locks but purely atomic operations.
