@@ -2,13 +2,13 @@
 
 #pragma once
 #include "Project.hpp"
+#include "impl/io_file.hpp"
 #include "render_engine.hpp"
 #include "lua_application.hpp"
 #include "utility.hpp"
 #include "impl/geometry.hpp"
-#include "impl/utility/rgb.hpp"
+#include "tx/json.h"
 #include <iostream>
-#include <utility>
 
 class Application {
 private:
@@ -82,8 +82,19 @@ private:
 		stbi_set_flip_vertically_on_load(true);
 		glfwSwapInterval(0); // turn off vsync
 
-		lua = tx::ParticleDynamics::LuaApplication(
-		    "demo/galaxy");
+		std::string demoPath;
+		{
+			tx::JsonDocument doc(tx::readWholeFileText("config/config.json"));
+			tx::u32 index = doc.root().find("demo");
+			if (tx::valid(index) && doc.root().at(index).is_str()) {
+				demoPath = doc.root().at(index).get_str_unchecked();
+			} else {
+				std::cerr << "[Error] Failed to read config.json. Entry \"demo\""
+				             " does not exist or is not string type.\n";
+				return 0;
+			}
+		}
+		lua = tx::ParticleDynamics::LuaApplication(demoPath);
 		lua.configure([this](tx::ParticleDynamics::LuaApplication::EngineArg engineArg,
 		                     tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
 		                  -> tx::ParticleDynamics::EngineCollection {
