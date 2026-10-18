@@ -85,11 +85,11 @@ private:
 		std::string demoPath;
 		{
 			tx::JsonDocument doc(tx::readWholeFileText("config/config.json"));
-			tx::u32 index = doc.root().find("demo");
+			tx::u32 index = doc.root().find("script");
 			if (tx::valid(index) && doc.root().at(index).is_str()) {
 				demoPath = doc.root().at(index).get_str_unchecked();
 			} else {
-				std::cerr << "[Error] Failed to read config.json. Entry \"demo\""
+				std::cerr << "[Error] Failed to read config.json. Entry \"script\""
 				             " does not exist or is not string type.\n";
 				return 0;
 			}

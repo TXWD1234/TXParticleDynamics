@@ -7,10 +7,12 @@
 - 200 average fps
 
 # Screenshot
-![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot1.png)
-![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot2.png)
-![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot3.png)
-![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/screenshot4.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/cluster.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/galaxy.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/galaxy-2.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/spiral.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/centrifuge.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/centrifuge-2.png)
 
 # Installation
 ## Build from source
@@ -52,3 +54,11 @@ glMakeTextureHandleNonResidentARB is null
 [FatalError]: Failed to init GLAD
 [FatalError]: Failed to init Application
 ```
+
+## Adjust the config and Play around with the Lua API
+The engine exposes a set of Lua APIs that can be called in a lua script. Which means you can write you own script and experiment with the engine. Here's how to do it:
+1. Create a new foldering in `demo/`. You can also just copy one of the existing demos.
+2. Make sure there are 3 files: `configure.lua`, `init.lua` and `runtime.lua` in the folder. It's okay for a file to be empty
+3. Edit entry `"script"` in `config/config.json` to your demo's path. It is the relative path from project root to the demo.
+4. Take reference to the `api.lua` file and other existing demos.
+5. Start writing your custom script!
