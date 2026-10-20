@@ -345,3 +345,34 @@ It is optimized for performance, *because of course it is,* using no locks but p
 Moving on to proper geometry integration such as Grid System, the project cannot continue to rely on the ancient TXMath from a year ago. Several flaws founded before, along with the inefficiency and inperfection of the entire architecture had driven this refactor, and now it is finally the time to do it.
 In this refactor, the entire `vec2` / `Coord` implementation was refactored to the templated `Vec<D, T>` version, the `geom_utils.hpp` utilities are also refactored for correctness and consistency.
 
+## 2026-10-18 15:58:42:<br>Category: Development Documentation<br>Topic: Grid System Overview
+The objective of week 1 (next week) is to implement the Grid System Optimization.
+Grid System Optimization turns the update time scaling from exponential to almost linear, which drastically decreases the total update time.
+It works by dividing the entire simulation world space into small uniform sized grids. Then during collision update, the objects in each grid would only need to compare against the objects in the surrounding grids, instead of every other object in the entire simulation world.
+
+### Constructing and Updating the Grid System Array
+The Grid System Array (gsArray) an array storing IDs of objects in each grid. The gsArray is arranged in the form of PackedPartedArray, mapped by Grid System Index Array (gsIndexArray).
+
+#### Construct the GSArray
+The construction of the GSArray utilizes algorithm of Radix Sort paired with Counting Algorithm.
+There are 4 stages of the construction of the array, listed as following:
+- Find grid pos of each object (gridpos array)
+- Construct gsIndexArray
+  Independent from the following stages, the construction of gsIndexArray first need to read the gridpos array and count the occurance of each grid index in another N array, and the turn that array into a PSA array as the final index array. In which the first step can only be done in a single thread.
+- Primary sort
+  Sorting gridpos (Lower 10 bit) into primary bucket array, which stores the upper 10 bits of the gridpos.
+  Along with that, an index array aligned with the buckets is also constructed, holding information of the object ID of each corresponding gridpos in the primary bucket array.
+- Secondary sort
+  Using primary bucket array, the secondary sort create the final GSArray by sorting each element in the primary bucket array, and instead of putting the gridpos value to the destination bucket slot, the corresponding object ID of that element is placed in the slot.
+
+#### Update the GSArray
+Updating the array is just reconstructing the array, since given that the position distribution of the objects are complete unpredictable with actual calculation, any extra branching or policy to attempt reuse the previous gsArray is completely extra overhead.
+
+
+
+
+## 2026-10-19 10:19:37:<br>Category: Development Documentation<br>Topic: Grid System Infrastructure
+- TaskThread for multi-threading
+  - SPSCQueue
+- ZGrid
+- PackedPartedView
