@@ -3,6 +3,7 @@
 #pragma once
 #include "Project.hpp"
 #include "impl/io_file.hpp"
+#include "infrastructure.hpp"
 #include "render_engine.hpp"
 #include "lua_application.hpp"
 #include "utility.hpp"
@@ -77,6 +78,7 @@ private:
 
 private:
 	bool init() {
+		tx::checkHardwareSupport();
 		tx::glfwSetKeyCallback<Application, &Application::onKeyEvent>(framework.getWindow(), this);
 		tx::glBasicSettings();
 		stbi_set_flip_vertically_on_load(true);

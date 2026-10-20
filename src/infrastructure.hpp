@@ -4,6 +4,8 @@
 #include "impl/allocator.hpp"
 #include "impl/basic_storage.hpp"
 #include "impl/data_utils.hpp"
+#include "impl/geometry.hpp"
+#include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
 #include <concepts>
 #include <atomic>
@@ -258,14 +260,76 @@ private:
 // **************** Grid System ****************
 // =============================================
 
+// ################ Z Grid ################
 /**
  * Using the ZGrid / Z-order curve to accomplish maximum cache locality when
  * accessing adjacent grids.
  * Forcing the grid side count to be pow2 for parallel update stability.
  */
 
+/**
+ * Some macro and instrinsic abomination have to be used here for direct access
+ * of hardware instruction, and cross platform portability for machines that
+ * don't have the instruction
+ */
+} // namespace tx
+
+#if defined(__BMI2__)
+namespace tx {
+constexpr bool PDEP_Available = true;
+}
+#include <immintrin.h>
+#else
+namespace tx {
+constexpr bool PDEP_Available = false;
+}
+#endif
+
+namespace tx {
+inline u32 ZGridToIndex(uvec2 pos) {
+	if constexpr (PDEP_Available)
+		return _pdep_u32((u16)pos.x, 0x55555555) |
+		       _pdep_u32((u16)pos.y, 0xAAAAAAAA);
+	else {
+		auto spread = [](u16 val) -> u32 {
+			u32 v = val;
+			v = (v | (v << 8)) & 0x00FF00FF;
+			v = (v | (v << 4)) & 0x0F0F0F0F;
+			v = (v | (v << 2)) & 0x33333333;
+			v = (v | (v << 1)) & 0x55555555;
+			return v;
+		};
+		return spread(pos.x) | (spread(pos.y) << 1);
+	}
+}
+inline uvec2 ZGridToPos(u32 index) {
+	if constexpr (PDEP_Available)
+		return {
+			static_cast<u16>(_pext_u32((u16)index, 0x55555555)),
+			static_cast<u16>(_pext_u32((u16)index, 0xAAAAAAAA))
+		};
+	else {
+		auto compact = [](u32 v) -> u16 {
+			v &= 0x55555555;
+			v = (v ^ (v >> 1)) & 0x33333333;
+			v = (v ^ (v >> 2)) & 0x0F0F0F0F;
+			v = (v ^ (v >> 4)) & 0x00FF00FF;
+			v = (v ^ (v >> 8)) & 0x0000FFFF;
+			return static_cast<u16>(v);
+		};
+		return { compact(index), compact(index >> 1) };
+	}
+}
 
 
 
+
+template <std::invocable<std::string_view> Func =
+              decltype([](std::string_view str) { std::cout << str << '\n'; })>
+inline void checkHardwareSupport(Func&& f = Func{}) {
+	if constexpr (!PDEP_Available)
+		f("[Warning]: Target machine missing Bit Manipulation Instruction Set 2 "
+		  "(BMI2) support. Some features or optimizations might be unavailable.");
+}
 
 } // namespace tx
