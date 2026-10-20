@@ -322,6 +322,44 @@ inline uvec2 ZGridToPos(u32 index) {
 }
 
 
+// ################ PackedPartedView ################
+
+namespace impl {
+
+template <class T>
+std::span<T> packedPartedPartition(
+    T* dataPtr, u32* metaPtr, u32 partIndex) {
+	return std::span<T>(
+	    dataPtr + *(metaPtr + partIndex),
+	    dataPtr + *(metaPtr + partIndex + 1));
+}
+} // namespace impl
+
+// deliberately omited bound check
+template <class T>
+class PackedPartedView {
+public:
+	PackedPartedView(T* data, u32* meta)
+	    : m_data(data), m_meta(meta) {}
+
+	PackedPartedView(const PackedPartedView& other) = default;
+	PackedPartedView& operator=(const PackedPartedView& other) = default;
+	PackedPartedView(PackedPartedView&& other) = default;
+	PackedPartedView& operator=(PackedPartedView&& other) = default;
+
+public:
+	using partition = std::span<T>;
+
+	partition at(u32 partIndex) const {
+		impl::packedPartedPartition(m_data, m_meta, partIndex);
+	}
+	partition operator[](u32 partIndex) const { return at(partIndex); }
+
+private:
+	T* m_data;
+	u32* m_meta;
+};
+
 
 
 template <std::invocable<std::string_view> Func =
