@@ -49,7 +49,7 @@ void LuaApplication::configure(
 	auto [engine, re] = f(engineArg, reArg);
 
 	m_impl->pd["param"] = sol::lua_nil;
-	m_impl->pd["config"] = std::ref(engine->m_config);
+	m_impl->pd["config"] = std::ref(engine->config());
 	m_impl->re = sol::lua_nil;
 
 	exposeEngine_impl(engine);

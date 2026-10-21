@@ -62,10 +62,10 @@ function(tx_add_txlib)
 		# use `SOURCE_SUBDIR` to work around the MakeAvailable's auto `add_subdirectory`
 
 		FetchContent_MakeAvailable(txlib)
-		FetchContent_GetProperties(txlib)
-
-		set(TXLib_SOURCE_DIR "${txlib_SOURCE_DIR}")
-		set(TXLib_BINARY_DIR "${txlib_BINARY_DIR}")
+		FetchContent_GetProperties(txlib
+			SOURCE_DIR TXLib_SOURCE_DIR
+			BINARY_DIR TXLib_BINARY_DIR
+		)
 	endif()
 	
 	# <-------------------------------------------------

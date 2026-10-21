@@ -368,11 +368,14 @@ There are 4 stages of the construction of the array, listed as following:
 #### Update the GSArray
 Updating the array is just reconstructing the array, since given that the position distribution of the objects are complete unpredictable with actual calculation, any extra branching or policy to attempt reuse the previous gsArray is completely extra overhead.
 
-
-
-
 ## 2026-10-19 10:19:37:<br>Category: Development Documentation<br>Topic: Grid System Infrastructure
 - TaskThread for multi-threading
   - SPSCQueue
 - ZGrid
 - PackedPartedView
+
+## 2026-10-19 23:02:23:<br>Category: Development Report<br>Topic: Completion of the Preparation of Grid System
+As stated above, the design of the grid system is now settled.
+And all infrastructures of grid system are also implemented.
+A week after finishing the basic solver, it is finally time to embark our optmization journey.
+At this time, the implementation of Grid System has began.

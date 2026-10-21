@@ -3,8 +3,6 @@ cmake_minimum_required(VERSION 4.2)
 set(libs "${CMAKE_SOURCE_DIR}/libs")
 set(src "${CMAKE_SOURCE_DIR}/src")
 
-include("${libs}/TXLib/add_txlib.cmake")
-
 project(TXProject)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_VERIFY_INTERFACE_HEADER_SETS ON)
@@ -17,16 +15,23 @@ endif()
 # Dependencies
 
 # TXLib
+include("${libs}/TXLib/add_txlib.cmake")
 tx_add_txlib(
-	LOCAL_DIR
-		/home/TX_Jerry/Programming/dev/libs/TXLib
-	BUILD_DIR
-		./build
+	VERSION "refactor/lib-structure"
+	LOCAL_DIR /home/TX_Jerry/Programming/dev/libs/TXLib
+	BUILD_DIR ./build
 )
 
 # Lua and sol2
 find_package(Lua 5.4 EXACT REQUIRED)
-add_subdirectory(${CMAKE_SOURCE_DIR}/libs/sol2)
+include("${TXLib_SOURCE_DIR}/cmake/add_lib.cmake")
+tx_add_lib(
+	LIB_NAME sol2
+	LOCAL_DIR /home/TX_Jerry/Programming/dev/libs/sol2
+	BIN_DIR ./build
+	VERSION v3.3.0
+	REPOSITORY https://github.com/ThePhD/sol2.git
+)
 
 # Project
 
