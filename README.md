@@ -6,6 +6,39 @@
 - 7500 object
 - 200 average fps
 
+## Why am I not getting the promised performance?
+### 1. Hardware differece
+The test machine specs:
+**Host**: 83LY Legion Y7000 IRX10 
+**Kernel**: 7.2.7-arch1-1
+**CPU**: 13th Gen Intel i7-13650HX (20) @ 4.700GHz 
+**GPU**: NVIDIA GeForce RTX 5060 Max-Q / Mobile 
+**RAM**: 23744MiB
+
+### Substep settings
+The peak performance profile data is achieved in the lowest substep (1), which is how many times the simluation updates each frame, the more times the accurate the simulation is, but also slower.
+The default substep is 8 for physics stability. Make sure to set it to 1 if you want maximum performance:
+In `configure.lua`
+```lua
+pd.param.SubstepCount = 1
+```
+
+### Force hardware acceleration
+During my tests, I used a custom script to force the hardware to it's maximum limit.
+*Note that this script is made custom to arch linux, against my own machine. Expect errors and changes required to the script.*
+```bash
+# set all CPU to performace mode
+echo "performance" | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference > /dev/null
+# enable CPU turbo boost
+echo 0 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo > /dev/null
+# unleash CPU frequency
+sudo cpupower frequency-set -u $(cat /sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq) > /dev/null
+# enable all CPU cores
+for ((i=1; i<$(nproc --all); i++)); do
+	echo 1 | sudo tee /sys/devices/system/cpu/cpu$i/online > /dev/null
+done
+```
+
 # Screenshot
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/cluster.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/galaxy.png)
@@ -18,7 +51,7 @@
 ## Build from source
 *Make sure CMake, and a viable C++ compiler (recommand g++) is installed.*
 **To build:**
-1. Download and extract the source code
+1. Download and extract the source code / Clone the repo
 2. `cd` into the project directory, and execute the following commands:
 ```bash
 mkdir build && cd build
