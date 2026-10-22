@@ -5,8 +5,6 @@
 #include "impl/io_file.hpp"
 #include "render_engine.hpp"
 #include <exception>
-#include <sol/optional_implementation.hpp>
-#include <sol/types.hpp>
 #define SOL_ALL_SAFETIES_ON 1
 #include "sol/sol.hpp"
 #include <memory>

@@ -29,7 +29,7 @@ tx_add_lib(
 	LIB_NAME sol2
 	LOCAL_DIR /home/TX_Jerry/Programming/dev/libs/sol2
 	BIN_DIR ./build
-	VERSION v3.3.0
+	VERSION develop
 	REPOSITORY https://github.com/ThePhD/sol2.git
 )
 
