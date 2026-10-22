@@ -56,6 +56,8 @@ public:
 public:
 	// ################ Public Interface ################
 
+	EngineConfig& config() { return m_config; }
+
 	u32 createObject(vec2 pos, vec2 initVel = tx::Origin) {
 		m_data.pos[m_state.objectCount] = pos;
 		m_data.prevPos[m_state.objectCount] = pos - initVel;
