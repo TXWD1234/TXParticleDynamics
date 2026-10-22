@@ -5,10 +5,11 @@
 #include "impl/basic_storage.hpp"
 #include "impl/data_utils.hpp"
 #include "impl/geometry.hpp"
+#include "impl/numeric_utils.hpp"
 #include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
-#include <concepts>
 #include <atomic>
+#include <concepts>
 #include <memory>
 #include <thread>
 #include <type_traits>
@@ -24,31 +25,27 @@ namespace tx {
 // **************** Concurrency ****************
 // =============================================
 
-
 /**
  * Single-Producer-Single-Consumer Queue built for concurrency
  */
-template <class T, tx::allocator Allocator = std::allocator<T>>
+template <std::move_constructible T, tx::allocator Allocator = std::allocator<T>>
 class SPSCQueue {
 	/**
 	 * Assumptions this data structures make:
 	 * - push() is always called by a single thread (producer thread)
-	 * - pull() / front() / pop() together are always called by a single thread
-	 *   (consumer thread)
+     * - pull() is always called by a single thread (consumer thread)
 	 */
 
 	/**
 	 * Conventions this data structure expects user to follow:
-	 * - front() is always called before pop(). Ideally the user should just
-	 *   use pull().
 	 * - The queue must be destroyed after the threads are joined. Implying the
 	 *   queue to be declared before the thread in the parent class.
 	 */
 
 	/**
 	 * For implementation details, the established convention is:
-	 * - Producer thread owns m_state.end
-	 * - Consumer thread owns m_state.begin
+     * - Producer thread owns m_state.producer, and the end of the buffer
+     * - Consumer thread owns m_state.consumer, and the front of the buffer
 	 */
 
 	/**
@@ -71,7 +68,6 @@ public:
 			m_storage = tx::BasicStorage<T, Allocator>(size, alloc);
 		}
 	}
-	~SPSCQueue() { clear(); }
 
 public:
 	// ================ Public Interface ================
@@ -79,83 +75,82 @@ public:
 	template <class... Args>
 	    requires std::constructible_from<T, Args...>
 	void push(Args&&... args) {
-		while (true) {
-			u32 old = m_state.begin.load(std::memory_order_acquire);
-			if (m_state.end.load(std::memory_order_relaxed) - old < m_storage.size) break;
-			m_state.begin.wait(old, std::memory_order_acquire);
+		u32 end = m_state.producer.end.load(std::memory_order_relaxed);
+		while (end - m_state.producer.begin >= m_storage.size) {
+			u32 oldBegin = m_state.producer.begin;
+			m_state.producer.begin =
+			    m_state.consumer.begin.load(std::memory_order_acquire);
+			m_state.producerSleeping.store(true, std::memory_order_seq_cst);
+			m_state.consumer.begin.wait(oldBegin, std::memory_order_seq_cst);
+			m_state.producerSleeping.store(false, std::memory_order_release);
 		}
-		std::construct_at(end_impl(), std::forward<Args>(args)...);
-		push_impl();
+
+		std::construct_at(end_impl(end), std::forward<Args>(args)...);
+		m_state.producer.end.store(end + 1, std::memory_order_seq_cst);
+		// notify only if the consumer is currently sleeping and it gets the
+		// it out of empty state
+		if (m_state.consumerSleeping.load(std::memory_order_seq_cst))
+			m_state.producer.end.notify_one();
 	}
 
 	T pull() {
-		T val = std::move(front());
-		pop();
-		return val;
-	}
-
-	template <class Self>
-	tx::const_propagate<Self, T>& front(this Self&& self) {
-		while (true) {
-			u32 old = self.m_state.end.load(std::memory_order_acquire);
-			if (old - self.m_state.begin.load(std::memory_order_relaxed) != 0) break;
-			self.m_state.end.wait(old, std::memory_order_acquire);
+		u32 begin = m_state.consumer.begin.load(std::memory_order_relaxed);
+		while (m_state.consumer.end - begin == 0) {
+			u32 oldEnd = m_state.consumer.end;
+			m_state.consumer.end =
+			    m_state.producer.end.load(std::memory_order_acquire);
+			m_state.consumerSleeping.store(true, std::memory_order_seq_cst);
+			m_state.producer.end.wait(oldEnd, std::memory_order_seq_cst);
+			m_state.consumerSleeping.store(false, std::memory_order_release);
 		}
-		return *self.begin_impl();
-	}
-	void pop() {
-		std::destroy_at(begin_impl());
-		pop_impl();
-	}
 
-	// must be called after all threads are joined
-	void clear() {
-		while (!producer_empty_impl()) pop();
+		T* ptr = begin_impl(begin);
+		T ret = std::move(*ptr);
+		std::destroy_at(ptr);
+		m_state.consumer.begin.store(begin + 1, std::memory_order_seq_cst);
+		// notify only if the producer is currently sleeping and it gets the
+		// it out of full state
+		if (m_state.producerSleeping.load(std::memory_order_seq_cst))
+			m_state.consumer.begin.notify_one();
+		return ret;
 	}
-
-private:
-	tx::BasicStorage<T, Allocator> m_storage;
 
 private:
 	// ================ Ring Buffer Implementation ================
 	// Re-implementing ring buffer here because access to the foundational
 	// indices are required.
 
-	struct {
-		alignas(CacheLineSize) std::atomic<u32> begin = 0;
-		alignas(CacheLineSize) std::atomic<u32> end = 0;
+	alignas(CacheLineSize) struct {
+		alignas(CacheLineSize) struct {
+			std::atomic<u32> begin = 0;
+			u32 end = 0; // cached value
+		} consumer;
+		alignas(CacheLineSize) std::atomic<bool> consumerSleeping = false;
+
+		alignas(CacheLineSize) struct {
+			std::atomic<u32> end = 0;
+			u32 begin = 0; // cached value
+		} producer;
+		alignas(CacheLineSize) std::atomic<bool> producerSleeping = false;
 	} m_state;
 
-	void push_impl() {
-		m_state.end.store(
-		    m_state.end.load(std::memory_order_relaxed) + 1,
-		    std::memory_order_release);
-		m_state.end.notify_one();
-	}
-	void pop_impl() {
-		m_state.begin.store(
-		    m_state.begin.load(std::memory_order_relaxed) + 1,
-		    std::memory_order_release);
-		m_state.begin.notify_one();
-	}
+private:
+	tx::BasicStorage<T, Allocator> m_storage;
 
+private:
 	template <class Self>
-	tx::const_propagate<Self, T>* begin_impl(this Self&& self) {
+	tx::const_propagate<Self, T>* begin_impl(this Self&& self, u32 begin) {
 		return self.m_storage.data +
-		       impl::findPowTwoWrappedPhysIndex(
-		           self.m_state.begin.load(std::memory_order_relaxed),
-		           self.m_storage.size);
+		       impl::findPowTwoWrappedPhysIndex(begin, self.m_storage.size);
 	}
-	T* end_impl() {
+	T* end_impl(u32 end) {
 		return m_storage.data +
-		       impl::findPowTwoWrappedPhysIndex(
-		           m_state.end.load(std::memory_order_relaxed),
-		           m_storage.size);
+		       impl::findPowTwoWrappedPhysIndex(end, m_storage.size);
 	}
 
 	bool producer_empty_impl() {
-		return m_state.end.load(std::memory_order_relaxed) -
-		           m_state.begin.load(std::memory_order_acquire) ==
+		return m_state.producer.end.load(std::memory_order_relaxed) -
+		           m_state.consumer.begin.load(std::memory_order_acquire) ==
 		       0;
 	}
 };
