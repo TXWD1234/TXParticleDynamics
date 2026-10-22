@@ -160,9 +160,9 @@ template <class Argument, class... TArgs>
         std::movable<Argument> && std::is_default_constructible_v<Argument> &&
         impl::ForwardLastAllocArgRemainder<TArgs...>::apply(
             []<class... Args>(tx::type_list_t<Args...>) {
-	            return tx::satisfies_all<
-	                decltype([]<class Arg>(std::type_identity<Arg>) {
-		                return std::invocable<Arg, Argument>;
+	            return tx::satisfies_all<decltype([]<class Arg>(
+	                                                  std::type_identity<Arg>) {
+		                                     return std::invocable<Arg, Argument&>;
 	                }),
 	                Args...>;
             }))
@@ -179,14 +179,13 @@ private:
 	// ================ Type Traits ================
 
 	using TaskFunc = typename tx::type_list_append_t<
-	    impl::ForwardLastAllocArgRemainder<TArgs...>, tx::Nothing>::
-	    template apply_t<std::variant>;
+	    impl::ForwardLastAllocArgRemainder<TArgs...>,
+	    tx::Nothing>::template apply_t<std::variant>;
 	struct Task {
 		TaskFunc f;
 		Argument arg;
 	};
-	using Allocator = impl::ParseLastAllocArg<
-	    std::allocator<Task>, TArgs...>;
+	using Allocator = impl::ParseLastAllocArg<std::allocator<Task>, TArgs...>;
 
 private:
 	// ================ Worker Function ================
@@ -196,8 +195,7 @@ private:
 		return std::visit(
 		    [&](auto& f) {
 			    if constexpr (
-			        std::same_as<std::remove_cvref_t<decltype(f)>,
-			                     tx::Nothing>)
+			        std::same_as<std::remove_cvref_t<decltype(f)>, tx::Nothing>)
 				    return false;
 			    else {
 				    f(task.arg);
@@ -213,9 +211,9 @@ private:
 
 public:
 	// ================ Lifetime ================
+
 	TaskThread(u32 queueCapacity = 256, const Allocator& alloc = Allocator{})
-	    : m_queue(queueCapacity, alloc),
-	      m_thread([this] { worker_impl(); }) {}
+	    : m_queue(queueCapacity, alloc), m_thread([this] { worker_impl(); }) {}
 
 	/**
 	 * Shutdown behavior: Finish executing all the queued tasks and then
@@ -223,24 +221,36 @@ public:
 	 */
 	~TaskThread() {
 		m_queue.push(Task{ TaskFunc{ tx::Nothing{} }, Argument{} });
-		if (m_thread.joinable()) m_thread.join();
+		if (m_thread.joinable())
+			m_thread.join();
 	}
+
+	TaskThread(const TaskThread& other) = delete;
+	TaskThread& operator=(const TaskThread& other) = delete;
+	TaskThread(TaskThread&& other) = default;
+	TaskThread& operator=(TaskThread&& other) = default;
 
 public:
 	// ================ Public Interface ================
 
 	// can only be called in one thread (producer thread)
-	template <class Func>
-	    requires(impl::ForwardLastAllocArgRemainder<TArgs...>::apply(
-	        []<class... Args>(tx::type_list_t<Args...>) {
+	template <class... Func>
+	    requires tx::satisfies_all<
+	        decltype([]<class F>(std::type_identity<F>) {
+		        return impl::ForwardLastAllocArgRemainder<TArgs...>::apply(
+		            []<class... Tasks>(tx::type_list_t<Tasks...>) {
 		        return tx::satisfies_any<
-		            decltype([]<class Arg>(std::type_identity<Arg>) {
-			            return std::same_as<Arg, Func>;
+			                decltype([]<class Task>(std::type_identity<Task>) {
+				                return std::same_as<Task, F>;
 		            }),
-		            Args...>;
-	        }))
-	void assign(Argument arg) {
-		m_queue.push(Task{ Func{}, std::move(arg) });
+			                Tasks...>;
+		            });
+	        }),
+	        Func...>
+	void assign(std::convertible_to<Argument> auto... arg)
+	    requires(sizeof...(arg) == sizeof...(Func))
+	{
+		(m_queue.push(Task{ Func{}, std::move(arg) }), ...);
 	}
 
 private:
