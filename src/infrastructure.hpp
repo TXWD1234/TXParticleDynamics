@@ -273,6 +273,7 @@ private:
 namespace tx {
 constexpr bool PDEP_Available = true;
 }
+#define MACRO_PDEP_Available
 #include <immintrin.h>
 #else
 namespace tx {
@@ -281,10 +282,23 @@ constexpr bool PDEP_Available = false;
 #endif
 
 namespace tx {
+namespace intrin {
+inline u32 pdep_u32(u32 x, u32 y) {
+#ifdef MACRO_PDEP_Available
+	return _pdep_u32(x, y);
+#endif
+}
+inline u32 pext_u32(u32 x, u32 y) {
+#ifdef MACRO_PDEP_Available
+	return _pext_u32(x, y);
+#endif
+}
+} // namespace intrin
+
 inline u32 ZGridToIndex(uvec2 pos) {
 	if constexpr (PDEP_Available)
-		return _pdep_u32((u16)pos.x, 0x55555555) |
-		       _pdep_u32((u16)pos.y, 0xAAAAAAAA);
+		return intrin::pdep_u32(pos.x, 0x55555555) |
+		       intrin::pdep_u32(pos.y, 0xAAAAAAAA);
 	else {
 		auto spread = [](u16 val) -> u32 {
 			u32 v = val;
@@ -299,10 +313,8 @@ inline u32 ZGridToIndex(uvec2 pos) {
 }
 inline uvec2 ZGridToPos(u32 index) {
 	if constexpr (PDEP_Available)
-		return {
-			static_cast<u16>(_pext_u32((u16)index, 0x55555555)),
-			static_cast<u16>(_pext_u32((u16)index, 0xAAAAAAAA))
-		};
+		return { intrin::pext_u32(index, 0x55555555),
+			     intrin::pext_u32(index, 0xAAAAAAAA) };
 	else {
 		auto compact = [](u32 v) -> u16 {
 			v &= 0x55555555;
@@ -314,8 +326,7 @@ inline uvec2 ZGridToPos(u32 index) {
 		};
 		return { compact(index), compact(index >> 1) };
 	}
-}
-
+} // namespace tx
 
 // ################ PackedPartedView ################
 
