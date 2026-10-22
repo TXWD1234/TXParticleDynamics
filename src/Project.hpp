@@ -1,12 +1,16 @@
 // Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
 
 #pragma once
+#include "infrastructure.hpp"
 #include "impl/geom_utils.hpp"
 #include "impl/geometry.hpp"
-#include "infrastructure.hpp"
-#include "tx/math.h"
+#include "impl/numeric_utils.hpp"
+#include "tx/type_traits.hpp"
+#include <atomic>
 #include <bits/stdc++.h>
 #include <cmath>
+#include <memory>
+#include <type_traits>
 
 // ########################################
 // $$$$$$$$$$$$$$$$ Engine $$$$$$$$$$$$$$$$
@@ -21,6 +25,7 @@ namespace tx::ParticleDynamics {
 struct EngineParameters {
 	u32 MaxEntityCount = 10000;
 	u32 SubstepCount = 8;
+	u32 ThreadCount = 20;
 };
 // all configuration that are not required to construct the engine
 struct EngineConfig {
@@ -30,27 +35,24 @@ struct EngineConfig {
 	f32 Restitution = 0.9f;
 };
 
-
 class Engine {
 public:
 	Engine() = default;
 	Engine(EngineParameters param, EngineConfig config)
-	    : m_data(
-	          std::vector<vec2>(param.MaxEntityCount),
-	          std::vector<vec2>(param.MaxEntityCount)),
-	      SubstepCount(param.SubstepCount), m_config(config) {}
+	    : m_param(param.SubstepCount),
+	      m_data(std::vector<vec2>(param.MaxEntityCount),
+	             std::vector<vec2>(param.MaxEntityCount)),
+	      m_config(config), m_threads(param.ThreadCount),
+	      m_gs(param.MaxEntityCount, m_threads) {}
 
 public:
 	// ################ Main Loop Interface ################
 
-	void update() {
-		update_impl(SubstepCount);
-	}
+	void update() { update_impl(m_param.SubstepCount); }
 
 	template <std::invocable<const std::span<vec2>> Func>
 	void draw(Func&& f) {
-		f(std::span(m_data.pos.begin(),
-		            m_data.pos.begin() + m_state.objectCount));
+		f(std::span(m_data.pos.begin(), m_data.pos.begin() + m_state.objectCount));
 	}
 
 public:
@@ -76,22 +78,22 @@ public:
 
 	// default to clock-wise. set magnitude to negative for counter-clockwise
 	void applyRotationalForce(f32 magnitude, vec2 center = tx::Origin) {
-		for (u32 i = 0; i < m_state.objectCount; i++) {
-			applyVel_impl(
-			    i, tx::rightPerp(
-			           tx::normalize(center - m_data.pos[i])) *
-			           magnitude);
-		}
+		for (u32 i = 0; i < m_state.objectCount; i++)
+			applyVel_impl(i, tx::rightPerp(tx::normalize(center - m_data.pos[i])) * magnitude);
 	}
 
 private:
 	// ################ Runtime Data ################
 
+	struct Parameters_impl {
+		u32 SubstepCount;
+	} m_param;
+
 	struct Data_impl {
 		/**
-		 * Everything is going to be in an arena in the future, but for this
-		 * prototype, std::vector is fine
-		 */
+     * Everything is going to be in an arena in the future, but for this
+     * prototype, std::vector is fine
+     */
 		std::vector<vec2> pos;
 		std::vector<vec2> prevPos;
 	} m_data;
@@ -100,21 +102,88 @@ private:
 		u32 objectCount = 0;
 	} m_state;
 
-	u32 SubstepCount;
-
-public:
 	EngineConfig m_config;
+
+private:
+	// ================ Concurrency ================
+
+	struct TaskGSConstructGridPosArray {
+		struct Argument {
+			const vec2* src;
+			u32* dest;
+			u32 size;
+			u32 SideCellCount;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			for (u32 i = 0; i < arg.size; i++) {
+				(*(arg.dest + i)) =
+				    tx::ZGridToIndex(findGridPos(*(arg.src + i), arg.SideCellCount));
+			}
+		}
+		uvec2 findGridPos(vec2 pos, f32 SideCellCount) {
+			return tx::toCoord<u32>((pos + vec2(1.0f)) * 0.5f * SideCellCount);
+		}
+	};
+
+	struct TaskFence {
+		struct Argument {
+			std::atomic<u32>* counter;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			if (arg.counter->fetch_sub(1, std::memory_order_acq_rel) == 1)
+				arg.counter->notify_one();
+		}
+	};
+
+	using TaskList = tx::type_list_t<TaskFence, TaskGSConstructGridPosArray>;
+
+	template <class T>
+	using ThreadArgumentExtract_t = typename T::Argument;
+	using ThreadArgument = tx::type_list_apply_t<
+	    tx::type_list_transform_t<TaskList, ThreadArgumentExtract_t>,
+	    std::variant>;
+
+	using Thread = typename decltype(TaskList::apply(
+	    []<class... Args>(tx::type_list_t<Args...>) {
+		    return std::type_identity<TaskThread<ThreadArgument, Args...>>{};
+	    }))::type;
+
+	using Distributor = TaskThreadDistributor<ThreadArgument, Thread>;
+
+	std::vector<Thread> m_threads;
+
+	// ================ Concurrency Helpers ================
+
+	// assign with fences
+	template <class... Func>
+	static void threadAssignFenced_impl(Distributor& distor,
+	                                    std::unique_ptr<std::atomic<u32>>& counter,
+	                                    auto... args) {
+		distor.assign<Func..., TaskFence>(
+		    args..., TaskFence::Argument{ counter.get() });
+	}
+
+	template <class Func>
+	static void threadRunFencedProcess_impl(std::unique_ptr<std::atomic<u32>>& counter,
+	                                        u32 threadCount, Func&& f) {
+		counter->store(threadCount, std::memory_order_release);
+		f();
+		u32 count = counter->load(std::memory_order_acquire);
+		while (count != 0) {
+			counter->wait(count, std::memory_order_acquire);
+			count = counter->load(std::memory_order_acquire);
+		}
+	}
 
 private:
 	// ################ Implementation Utility ################
 
-	vec2 findVel_impl(u32 id) {
-		return m_data.pos[id] - m_data.prevPos[id];
-	}
-	void applyVel_impl(u32 id, vec2 vel) {
-		m_data.prevPos[id] -= vel;
-	}
-
+	vec2 findVel_impl(u32 id) { return m_data.pos[id] - m_data.prevPos[id]; }
+	void applyVel_impl(u32 id, vec2 vel) { m_data.prevPos[id] -= vel; }
 
 private:
 	// ################ Logic Utility ################
@@ -123,9 +192,97 @@ private:
 		return sq(a.x - b.x) + sq(a.y - b.y) < sq(dist);
 	}
 	bool isColliding(u32 a, u32 b) {
-		return isColliding(m_data.pos[a], m_data.pos[b],
-		                   m_config.ObjectRadius * 2);
+		return isColliding(m_data.pos[a], m_data.pos[b], m_config.ObjectRadius * 2);
 	}
+
+private:
+	// ################ Grid System ################
+
+	class GridSystem_impl {
+	public:
+		// ================ Lifetime ================
+
+		GridSystem_impl() = default;
+		GridSystem_impl(u32 MaxEntityCount, std::span<Thread> threads)
+		    : m_source({ {}, threads, Distributor(threads) }) {
+			constructBuffers_impl(MaxEntityCount);
+			constructState_impl(MaxEntityCount);
+		}
+
+	public:
+		// ================ Public Accessor ================
+
+		tx::PackedPartedView<u32> view() {
+			return tx::PackedPartedView<u32>(array.data(), indexArray.data());
+		}
+
+	public:
+		// ================ Public Interface ================
+
+		void update(std::span<const vec2> posBuffer) {
+			m_source.pos = posBuffer;
+			update_impl();
+		}
+
+	private:
+		// ================ Grid System Data ================
+
+		std::vector<u32> array;
+		std::vector<u32> indexArray;
+
+	private:
+		// ================ Update Buffers ================
+
+		struct Source_impl {
+			std::span<const vec2> pos;
+			std::span<Thread> threads;
+			Distributor distor;
+		} m_source;
+
+		struct Data_impl {
+			std::vector<u32> gridPos;
+		} m_data;
+
+		struct State_impl {
+			u32 SideCellCount = 0;
+			std::unique_ptr<std::atomic<u32>> threadStatusCounter =
+			    std::make_unique<std::atomic<u32>>(0);
+		} m_state;
+
+		void constructBuffers_impl(u32 n) {
+			array.resize(n);
+			indexArray.resize(n);
+			m_data.gridPos.resize(n);
+		}
+		void constructState_impl(u32 n) {
+			m_state.SideCellCount =
+			    tx::nextPowTwo(static_cast<u32>(std::ceil(std::sqrt(n))));
+		}
+
+	private:
+		// ================ Update Logic ================
+
+		void update_impl() {
+			m_source.distor.reset();
+			constructGridPosArray_impl();
+		}
+
+		void constructGridPosArray_impl() {
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(), [this]() {
+				    tx::distributePartitions(
+				        m_source.pos.size(), m_source.threads.size(),
+				        [this](u32 begin, u32 end) {
+					        threadAssignFenced_impl<TaskGSConstructGridPosArray>(
+					            m_source.distor, m_state.threadStatusCounter,
+					            TaskGSConstructGridPosArray::Argument{
+					                m_source.pos.data() + begin,
+					                m_data.gridPos.data() + begin, end - begin,
+					                m_state.SideCellCount });
+				        });
+			    });
+		}
+	} m_gs;
 
 private:
 	// ################ Logic Implementation ################
@@ -153,7 +310,8 @@ private:
 
 	void updateGravity_impl(f32 dt) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			m_data.pos[i] += tx::normalize(tx::Origin - m_data.pos[i]) * m_config.Gravity * dt;
+			m_data.pos[i] +=
+			    tx::normalize(tx::Origin - m_data.pos[i]) * m_config.Gravity * dt;
 		}
 	}
 
@@ -184,16 +342,23 @@ private:
 		vec2 relVel = findVel_impl(a) - findVel_impl(b); // relative velocity
 		f32 nRelVel = dot(relVel, nuv);
 
-		if (nRelVel >= -0.0001f) return;
+		if (nRelVel >= -0.0001f)
+			return;
+		// nRelVel = std::min(0.0f, nRelVel);
 
 		// solve bounce
-		float bounceImpulse = nRelVel * m_config.Restitution;
+		f32 bounceImpulse = nRelVel * m_config.Restitution;
 		vec2 impulseVec = nuv * bounceImpulse;
 		m_data.prevPos[a] += impulseVec;
 		m_data.prevPos[b] -= impulseVec;
 	}
 };
 
-
-
 } // namespace tx::ParticleDynamics
+
+/**
+ * Idea:
+ * Grid System:
+ * - instead of making a grid system array, rearrange the position array
+ *   directly. Effectively sorting the position buffer.
+ */
