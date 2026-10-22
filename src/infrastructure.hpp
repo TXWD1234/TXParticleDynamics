@@ -31,26 +31,26 @@ namespace tx {
 template <std::move_constructible T, tx::allocator Allocator = std::allocator<T>>
 class SPSCQueue {
 	/**
-	 * Assumptions this data structures make:
-	 * - push() is always called by a single thread (producer thread)
+     * Assumptions this data structures make:
+     * - push() is always called by a single thread (producer thread)
      * - pull() is always called by a single thread (consumer thread)
-	 */
+     */
 
 	/**
-	 * Conventions this data structure expects user to follow:
-	 * - The queue must be destroyed after the threads are joined. Implying the
-	 *   queue to be declared before the thread in the parent class.
-	 */
+     * Conventions this data structure expects user to follow:
+     * - The queue must be destroyed after the threads are joined. Implying the
+     *   queue to be declared before the thread in the parent class.
+     */
 
 	/**
-	 * For implementation details, the established convention is:
+     * For implementation details, the established convention is:
      * - Producer thread owns m_state.producer, and the end of the buffer
      * - Consumer thread owns m_state.consumer, and the front of the buffer
-	 */
+     */
 
 	/**
-	 * To break pull() from deadlocking in empty queue, push a sentinel value.
-	 */
+     * To break pull() from deadlocking in empty queue, push a sentinel value.
+     */
 
 public:
 	SPSCQueue(u32 size, Allocator alloc = Allocator{}) {
@@ -163,18 +163,18 @@ template <class Argument, class... TArgs>
 	            return tx::satisfies_all<decltype([]<class Arg>(
 	                                                  std::type_identity<Arg>) {
 		                                     return std::invocable<Arg, Argument&>;
-	                }),
-	                Args...>;
+	                                     }),
+	                                     Args...>;
             }))
 class TaskThread {
 	/**
-	 * This class is design for non-trivial tasks. Pushing frequently with
-	 * trivially done tasks is discouraged.
-	 */
+     * This class is design for non-trivial tasks. Pushing frequently with
+     * trivially done tasks is discouraged.
+     */
 
 	/**
-	  * DevNote: should I support stateful lambdas?
-	  */
+     * DevNote: should I support stateful lambdas?
+     */
 private:
 	// ================ Type Traits ================
 
@@ -216,9 +216,9 @@ public:
 	    : m_queue(queueCapacity, alloc), m_thread([this] { worker_impl(); }) {}
 
 	/**
-	 * Shutdown behavior: Finish executing all the queued tasks and then
-	 * shutdown
-	 */
+     * Shutdown behavior: Finish executing all the queued tasks and then
+     * shutdown
+     */
 	~TaskThread() {
 		m_queue.push(Task{ TaskFunc{ tx::Nothing{} }, Argument{} });
 		if (m_thread.joinable())
@@ -239,10 +239,10 @@ public:
 	        decltype([]<class F>(std::type_identity<F>) {
 		        return impl::ForwardLastAllocArgRemainder<TArgs...>::apply(
 		            []<class... Tasks>(tx::type_list_t<Tasks...>) {
-		        return tx::satisfies_any<
+			            return tx::satisfies_any<
 			                decltype([]<class Task>(std::type_identity<Task>) {
 				                return std::same_as<Task, F>;
-		            }),
+			                }),
 			                Tasks...>;
 		            });
 	        }),
@@ -260,6 +260,46 @@ private:
 	std::thread m_thread;
 };
 
+// Func(begin, end)
+template <std::invocable<u32, u32> Func>
+void distributePartitions(u32 size, u32 partCount, Func&& f) {
+	u32 partLen = size / partCount;
+	u32 remainder = size - partLen * partCount;
+	u32 begin = 0;
+	for (u32 i = 0; i < partCount - remainder; i++) {
+		f(begin, begin + partLen);
+		begin += partLen;
+	}
+	for (u32 i = 0; i < remainder; i++) {
+		f(begin, begin + partLen + 1);
+		begin += partLen + 1;
+	}
+}
+
+template <class Argument, tx::instantiation_of<TaskThread> Thread>
+class TaskThreadDistributor {
+public:
+	TaskThreadDistributor() = default;
+	TaskThreadDistributor(std::span<Thread> threads) : m_threads(threads) {}
+
+	template <class... Func>
+	    requires requires(Thread t, Argument arg) {
+		    (t.template assign<Func>(arg), ...);
+	    }
+	void assign(std::convertible_to<Argument> auto... arg)
+	    requires(sizeof...(arg) == sizeof...(Func))
+	{
+		(m_threads[m_index].template assign<Func>(std::move(arg)), ...);
+		if (++m_index == m_threads.size())
+			m_index = 0;
+	}
+
+	void reset() { m_index = 0; }
+
+private:
+	std::span<Thread> m_threads;
+	u32 m_index = 0;
+};
 
 // =============================================
 // **************** Grid System ****************
@@ -343,11 +383,9 @@ inline uvec2 ZGridToPos(u32 index) {
 namespace impl {
 
 template <class T>
-std::span<T> packedPartedPartition(
-    T* dataPtr, u32* metaPtr, u32 partIndex) {
-	return std::span<T>(
-	    dataPtr + *(metaPtr + partIndex),
-	    dataPtr + *(metaPtr + partIndex + 1));
+std::span<T> packedPartedPartition(T* dataPtr, u32* metaPtr, u32 partIndex) {
+	return std::span<T>(dataPtr + *(metaPtr + partIndex),
+	                    dataPtr + *(metaPtr + partIndex + 1));
 }
 } // namespace impl
 
@@ -355,8 +393,7 @@ std::span<T> packedPartedPartition(
 template <class T>
 class PackedPartedView {
 public:
-	PackedPartedView(T* data, u32* meta)
-	    : m_data(data), m_meta(meta) {}
+	PackedPartedView(T* data, u32* meta) : m_data(data), m_meta(meta) {}
 
 	PackedPartedView(const PackedPartedView& other) = default;
 	PackedPartedView& operator=(const PackedPartedView& other) = default;
@@ -367,7 +404,7 @@ public:
 	using partition = std::span<T>;
 
 	partition at(u32 partIndex) const {
-		impl::packedPartedPartition(m_data, m_meta, partIndex);
+		return impl::packedPartedPartition(m_data, m_meta, partIndex);
 	}
 	partition operator[](u32 partIndex) const { return at(partIndex); }
 
@@ -375,8 +412,6 @@ private:
 	T* m_data;
 	u32* m_meta;
 };
-
-
 
 template <std::invocable<std::string_view> Func =
               decltype([](std::string_view str) { std::cout << str << '\n'; })>
