@@ -9,6 +9,7 @@
 #include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
 #include <atomic>
+#include <climits>
 #include <concepts>
 #include <memory>
 #include <thread>
@@ -389,20 +390,12 @@ inline uvec2 ZGridToPos(u32 index) {
 
 // ################ PackedPartedView ################
 
-namespace impl {
-
-template <class T>
-std::span<T> packedPartedPartition(T* dataPtr, u32* metaPtr, u32 partIndex) {
-	return std::span<T>(dataPtr + *(metaPtr + partIndex),
-	                    dataPtr + *(metaPtr + partIndex + 1));
-}
-} // namespace impl
-
 // deliberately omited bound check
 template <class T>
 class PackedPartedView {
 public:
-	PackedPartedView(T* data, u32* meta) : m_data(data), m_meta(meta) {}
+	PackedPartedView() = default;
+	PackedPartedView(T* data, const u32* meta) : m_data(data), m_meta(meta) {}
 
 	PackedPartedView(const PackedPartedView& other) = default;
 	PackedPartedView& operator=(const PackedPartedView& other) = default;
@@ -413,13 +406,129 @@ public:
 	using partition = std::span<T>;
 
 	partition at(u32 partIndex) const {
-		return impl::packedPartedPartition(m_data, m_meta, partIndex);
+		return at(partIndex, m_data, m_meta);
 	}
 	partition operator[](u32 partIndex) const { return at(partIndex); }
 
+	static partition at(u32 partIndex, T* data, const u32* meta) {
+		return std::span<T>(data + *(meta + partIndex),
+		                    data + *(meta + partIndex + 1));
+	}
+
 private:
-	T* m_data;
-	u32* m_meta;
+	T* m_data = nullptr;
+	const u32* m_meta = nullptr;
+};
+
+template <class T>
+class UniformPartedView {
+public:
+	UniformPartedView() = default;
+	UniformPartedView(T* data, u32 partSize) : m_data(data), m_partSize(partSize) {}
+
+	UniformPartedView(const UniformPartedView& other) = default;
+	UniformPartedView& operator=(const UniformPartedView& other) = default;
+	UniformPartedView(UniformPartedView&& other) = default;
+	UniformPartedView& operator=(UniformPartedView&& other) = default;
+
+public:
+	using partition = std::span<T>;
+
+	partition at(u32 partIndex) const {
+		return at(partIndex, m_data, m_partSize);
+	}
+	partition operator[](u32 partIndex) const { return at(partIndex); }
+
+	static partition at(u32 partIndex, T* data, u32 partSize) {
+		return std::span<T>(data + partIndex * partSize,
+		                    data + partIndex * partSize + partSize);
+	}
+
+private:
+	T* m_data = nullptr;
+	u32 m_partSize = 0;
+};
+
+template <class Derived>
+class ContainerViewingInterface {
+	constexpr Derived& self() noexcept { return static_cast<Derived&>(*this); }
+	constexpr const Derived& self() const noexcept { return static_cast<const Derived&>(*this); }
+
+public:
+	[[nodiscard]] constexpr bool empty() const noexcept {
+		return self().begin() == self().end();
+	}
+
+	[[nodiscard]] constexpr auto size() const noexcept {
+		return self().end() - self().begin();
+	}
+
+	[[nodiscard]] constexpr decltype(auto) front() { return *self().begin(); }
+	[[nodiscard]] constexpr decltype(auto) front() const { return *self().begin(); }
+
+	[[nodiscard]] constexpr decltype(auto) back() { return *(self().end() - 1); }
+	[[nodiscard]] constexpr decltype(auto) back() const { return *(self().end() - 1); }
+
+	template <class Index>
+	constexpr decltype(auto) operator[](Index&& idx) {
+		return self().begin()[std::forward<Index>(idx)];
+	}
+
+	template <class Index>
+	constexpr decltype(auto) operator[](Index&& idx) const {
+		return self().begin()[std::forward<Index>(idx)];
+	}
+
+	constexpr auto data() noexcept { return std::to_address(self().begin()); }
+	constexpr auto data() const noexcept { return std::to_address(self().begin()); }
+};
+
+namespace impl {
+template <std::signed_integral T>
+constexpr T findSignedWrappedPhysIndex(T index, T size) {
+	T rem = index % size;
+	T mask = rem >> (sizeof(T) * CHAR_BIT - 1); // rem < 0 ? 0xFFFFFFFF : 0x0
+	return rem + (size & mask);
+}
+} // namespace impl
+
+template <class T, tx::allocator Allocator = std::allocator<T>>
+class AlternatingBuffer
+    : public ContainerViewingInterface<AlternatingBuffer<T, Allocator>> {
+private:
+	using View = UniformPartedView<T>;
+
+public:
+	AlternatingBuffer() = default;
+	AlternatingBuffer(u32 bufferSize, u32 bufferCount = 2, Allocator alloc = Allocator{})
+	    : m_alloc(std::move(alloc)),
+	      m_data(bufferSize * bufferCount, alloc),
+	      m_bufferSize(bufferSize), m_bufferCount(bufferCount) {
+	}
+
+	template <class Self>
+	std::span<tx::const_propagate<Self, T>> buffer(this Self&& self, i32 index = 0) {
+		return View::at(impl::findSignedWrappedPhysIndex(
+		                    self.m_index + index, (i32)self.m_bufferCount),
+		                self.m_data.data, self.m_bufferSize);
+	}
+	void swap() {
+		m_index = (m_index + 1) % m_bufferCount;
+	}
+
+	template <class Self>
+	auto begin(this Self&& self) { return self.buffer().begin(); }
+	template <class Self>
+	auto end(this Self&& self) { return self.buffer().end(); }
+
+private:
+	using alloc_traits = tx::typed_allocator_traits<Allocator, T>;
+	Allocator m_alloc;
+
+private:
+	tx::BasicStorage<T> m_data;
+	i32 m_index = 0;
+	u32 m_bufferSize = 0, m_bufferCount = 0;
 };
 
 template <std::invocable<std::string_view> Func =
