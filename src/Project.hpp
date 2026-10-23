@@ -7,6 +7,7 @@
 #include "impl/numeric_utils.hpp"
 #include "tx/type_traits.hpp"
 #include <atomic>
+#include <bit>
 #include <bits/stdc++.h>
 #include <cmath>
 #include <memory>
@@ -40,8 +41,8 @@ public:
 	Engine() = default;
 	Engine(EngineParameters param, EngineConfig config)
 	    : m_param(param.SubstepCount),
-	      m_data(std::vector<vec2>(param.MaxEntityCount),
-	             std::vector<vec2>(param.MaxEntityCount)),
+	      m_data(tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
+	             tx::AlternatingBuffer<vec2>(param.MaxEntityCount)),
 	      m_config(config), m_threads(param.ThreadCount),
 	      m_gs(param.MaxEntityCount, m_threads) {}
 
@@ -90,12 +91,9 @@ private:
 	} m_param;
 
 	struct Data_impl {
-		/**
-     * Everything is going to be in an arena in the future, but for this
-     * prototype, std::vector is fine
-     */
-		std::vector<vec2> pos;
-		std::vector<vec2> prevPos;
+		tx::AlternatingBuffer<vec2> pos;
+		tx::AlternatingBuffer<vec2> prevPos;
+		// std::vector<u32> ids; // ID of objects to adapt sorting
 	} m_data;
 
 	struct State_impl {
@@ -107,7 +105,7 @@ private:
 private:
 	// ================ Concurrency ================
 
-	struct TaskGSConstructGridPosArray {
+	struct TaskGSConstructGridPos {
 		struct Argument {
 			const vec2* src;
 			u32* dest;
@@ -127,6 +125,32 @@ private:
 		}
 	};
 
+	struct TaskGSConstructPrimarySortBucketIndex {
+		struct Argument {
+			u32 RadixDigit;
+			u32 RadixBucketCount;
+			u32 begin; // psa base
+			u32* src; // gridPos
+			u32 srcSize;
+			u32* dest; // size = RadixBucketCount; BucketIndex
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			// collect count of each bucket (DevNote: optimization: unroll & SIMD)
+			std::fill(arg.dest, arg.dest + arg.RadixBucketCount, 0);
+			for (u32 i = 0; i < arg.srcSize; i++) {
+				arg.dest[GridSystem_impl::radixLowerBits(arg.src[i], arg.RadixDigit)]++;
+			}
+			// construct psa (SIMDable)
+			u32 acc = arg.begin;
+			for (u32 i = 0; i < arg.RadixBucketCount; i++) {
+				acc += arg.dest[i];
+				arg.dest[i] = acc;
+			}
+		}
+	};
+
 	struct TaskFence {
 		struct Argument {
 			std::atomic<u32>* counter;
@@ -139,7 +163,10 @@ private:
 		}
 	};
 
-	using TaskList = tx::type_list_t<TaskFence, TaskGSConstructGridPosArray>;
+	using TaskList = tx::type_list_t<
+	    TaskFence,
+	    TaskGSConstructGridPos,
+	    TaskGSConstructPrimarySortBucketIndex>;
 
 	template <class T>
 	using ThreadArgumentExtract_t = typename T::Argument;
@@ -186,7 +213,7 @@ private:
 	void applyVel_impl(u32 id, vec2 vel) { m_data.prevPos[id] -= vel; }
 
 private:
-	// ################ Logic Utility ################
+	// ################ Physics Logic Utility ################
 
 	bool isColliding(vec2 a, vec2 b, f32 dist) {
 		return sq(a.x - b.x) + sq(a.y - b.y) < sq(dist);
@@ -196,17 +223,39 @@ private:
 	}
 
 private:
+	// ################ Grid System Sorter ################
+	// Sort the arrays according to the result of grid system update
+
+	struct GridSystemBufferSorter_impl {
+		Data_impl* m_data;
+		void operator()(u32 prev, u32 curr) {
+			m_data->pos.buffer(1)[curr] = m_data->pos.buffer(0)[prev];
+			m_data->prevPos.buffer(1)[curr] = m_data->prevPos.buffer(0)[prev];
+		}
+	};
+
+private:
 	// ################ Grid System ################
 
 	class GridSystem_impl {
+	public:
+		// ================ Task Utility ================
+
+		static u32 radixLowerBits(u32 val, u32 RadixDigit) {
+			return val & (~0x0 << RadixDigit);
+		}
+		static u32 radixHigherBits(u32 val, u32 RadixDigit) {
+			return val >> RadixDigit;
+		}
+
 	public:
 		// ================ Lifetime ================
 
 		GridSystem_impl() = default;
 		GridSystem_impl(u32 MaxEntityCount, std::span<Thread> threads)
 		    : m_source({ {}, threads, Distributor(threads) }) {
-			constructBuffers_impl(MaxEntityCount);
 			constructState_impl(MaxEntityCount);
+			constructBuffers_impl(MaxEntityCount);
 		}
 
 	public:
@@ -221,7 +270,7 @@ private:
 
 		void update(std::span<const vec2> posBuffer) {
 			m_source.pos = posBuffer;
-			update_impl();
+			construct_impl();
 		}
 
 	private:
@@ -239,49 +288,84 @@ private:
 			Distributor distor;
 		} m_source;
 
-		struct Data_impl {
-			std::vector<u32> gridPos;
-		} m_data;
-
 		struct State_impl {
 			u32 SideCellCount = 0;
+			u32 RadixDigit = 0;
+			u32 RadixBucketCount = 0;
 			std::unique_ptr<std::atomic<u32>> threadStatusCounter =
 			    std::make_unique<std::atomic<u32>>(0);
 		} m_state;
 
+		struct Data_impl {
+			// when reading names in here, add an imaginary "Array" suffix
+
+			std::vector<u32> gridPos;
+			std::vector<u32> primarySortBucket;
+			std::vector<u32> primarySortObjectID;
+			std::vector<u32> primarySortBucketIndex;
+		} m_data;
+
+		void constructState_impl(u32 n) {
+			m_state.SideCellCount =
+			    tx::nextPowTwo(static_cast<u32>(std::ceil(std::sqrt(n))));
+			m_state.RadixDigit = std::bit_width(n) / 2;
+			m_state.RadixBucketCount = tx::powi(2, m_state.RadixDigit);
+		}
 		void constructBuffers_impl(u32 n) {
 			array.resize(n);
 			indexArray.resize(n);
 			m_data.gridPos.resize(n);
-		}
-		void constructState_impl(u32 n) {
-			m_state.SideCellCount =
-			    tx::nextPowTwo(static_cast<u32>(std::ceil(std::sqrt(n))));
+			m_data.primarySortBucket.resize(n);
+			m_data.primarySortObjectID.resize(n);
+			m_data.primarySortBucketIndex.resize(
+			    m_state.RadixBucketCount * m_source.threads.size() + 1);
 		}
 
 	private:
-		// ================ Update Logic ================
+		// ================ GS Construction Logic ================
 
-		void update_impl() {
+		void construct_impl() {
 			m_source.distor.reset();
-			constructGridPosArray_impl();
+			constructGridPos_impl();
 		}
 
-		void constructGridPosArray_impl() {
+		void constructGridPos_impl() {
 			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(), [this]() {
+			    m_state.threadStatusCounter, m_source.threads.size(), [this] {
 				    tx::distributePartitions(
 				        m_source.pos.size(), m_source.threads.size(),
 				        [this](u32 begin, u32 end) {
-					        threadAssignFenced_impl<TaskGSConstructGridPosArray>(
+					        threadAssignFenced_impl<TaskGSConstructGridPos>(
 					            m_source.distor, m_state.threadStatusCounter,
-					            TaskGSConstructGridPosArray::Argument{
+					            TaskGSConstructGridPos::Argument{
 					                m_source.pos.data() + begin,
 					                m_data.gridPos.data() + begin, end - begin,
 					                m_state.SideCellCount });
 				        });
 			    });
 		}
+
+		void constructPrimarySort_impl() {
+			constructPrimarySortBucketIndex_impl();
+		}
+		// counting
+		void constructPrimarySortBucketIndex_impl() {
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(), [this] {
+				    tx::distributePartitions(
+				        m_data.gridPos.size(), m_source.threads.size(),
+				        [this](u32 begin, u32 end, u32 tIndex) {
+					        threadAssignFenced_impl<TaskGSConstructPrimarySortBucketIndex>(
+					            m_source.distor, m_state.threadStatusCounter,
+					            TaskGSConstructPrimarySortBucketIndex::Argument{
+					                m_state.RadixDigit, m_state.RadixBucketCount,
+					                begin, m_data.gridPos.data() + begin, end - begin,
+					                m_data.primarySortBucketIndex.data() + 1 +
+					                    tIndex * m_state.RadixBucketCount });
+				        });
+			    });
+		}
+
 	} m_gs;
 
 private:
@@ -357,8 +441,9 @@ private:
 } // namespace tx::ParticleDynamics
 
 /**
- * Idea:
+ * Optimization Idea:
+ * - Ensure all buffer's Cache line alignment
  * Grid System:
- * - instead of making a grid system array, rearrange the position array
+ * - (adopted) instead of making a grid system array, rearrange the position array
  *   directly. Effectively sorting the position buffer.
  */
