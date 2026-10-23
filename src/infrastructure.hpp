@@ -260,18 +260,27 @@ private:
 	std::thread m_thread;
 };
 
-// Func(begin, end)
-template <std::invocable<u32, u32> Func>
+// Func(begin, end) / Func(begin, end, threadIndex)
+template <class Func>
+    requires std::invocable<Func, u32, u32> ||
+             std::invocable<Func, u32, u32, u32>
 void distributePartitions(u32 size, u32 partCount, Func&& f) {
+	auto invoke = [&](u32 a, u32 b, u32 c) {
+		if constexpr (std::invocable<Func, u32, u32>)
+			f(a, b);
+		else
+			f(a, b, c);
+	};
 	u32 partLen = size / partCount;
 	u32 remainder = size - partLen * partCount;
 	u32 begin = 0;
+	u32 threadIndex = 0;
 	for (u32 i = 0; i < partCount - remainder; i++) {
-		f(begin, begin + partLen);
+		invoke(begin, begin + partLen, threadIndex++);
 		begin += partLen;
 	}
 	for (u32 i = 0; i < remainder; i++) {
-		f(begin, begin + partLen + 1);
+		invoke(begin, begin + partLen + 1, threadIndex++);
 		begin += partLen + 1;
 	}
 }
