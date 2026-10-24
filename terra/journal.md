@@ -379,3 +379,36 @@ As stated above, the design of the grid system is now settled.
 And all infrastructures of grid system are also implemented.
 A week after finishing the basic solver, it is finally time to embark our optmization journey.
 At this time, the implementation of Grid System has began.
+
+## 2026-10-23 00:56:41:<br>Category: Development Documentation<br>Topic: Update on Grid System Design
+Originally, the Grid System produces a grid system array and it's corresponding mapping array. And then intended for the future collision update to use that array to indirectly access the object position array in grid order.
+But it turns out that the memory footprint of the Grid System Array, as well as the indirection overhead can be completely eliminated: Instead of storing an indirection method, sort the position buffer directly during secondary sorting - the final step which originally produces the grid system array.
+Though, every single SoA buffer parallel to the position buffer are also required to be sorted correspondingly, or else the indirection is introduced again.
+But then if the user of the engine has an external SoA array mapped to the object IDs, for instance, a color array, the internal sorter won't be able to sort them.
+The appeared optimal solution was a hybrid design: sort all the internal arrays in parallel, and also keep an indirection table of the object ID exposed outside of the engine to the internal index in the parallel buffers.
+
+## 2026-10-23 01:04:40:<br>Category: Development Report<br>Topic: Implementing Grid System
+As the most un-productive part of the week advances (the weekdays), the Grid System implementation slowly progresses.
+Due to the massive amount of infrastructure required for Grid System, as it's the first serious component of the Engine up to this point, the actual progress of the Grid System was significantly delayed.
+The major bottleneck was Concurrency infrastructure. I haven't had any serious attempt for multi-threaded projects since TXLib started, therefore there were a lack of utility in TXLib regarding concurrency. That means everything must be implemented from scratch, and due to my lack of knowledge at the field of concurrency, the process was not considered efficient.
+However, the hardest part are already resolved. The necessary infrastructures are now all completed, and finally the actual implementation of Grid System can begin.
+*Didn't I said this already?*
+Currently, the first stage of the construction of Grid System was completed, as well as the counting of the primary sorting.
+
+## 2026-10-23 01:12:49:<br>Category: Development Report<br>Topic: Fixing Compatibility Issues
+After received the review from the prep week 2, I've realized several fatal flaws in my build from source system. Some major ones are namely:
+- TXLib reference was only on TXLib main branch, which was stalled since I started the massive refactor and ended up working on that branch for half a year. Fix: Changed to target branch refactor/lib-structure.
+- sol2 was managed by git submodule, which requires explicit flag to auto fetch the repo, which is not ideal for my targeted staight-forward building, since it's impossible to set it as default and I can only document it *(, and apparently not everyone reads documentation)*. Fix: Switched to the TXLib style dependency management: LOCAL_DIR exclusively for my own machine's development, and cmake FetchContent for any remote clones
+- Benchmark data and guide was incomplete. Reviewer was complaining about not getting the performance promised. Since there were several subtle detailed must be documented explicitly and won't be considered otherwise, adding it to the README is completely necessary.
+
+## 2026-10-23 23:00:59:<br>Category: Development Report<br>Topic: Completion of Grid System Primary Implementation
+Surprisingly, the implementation phase finished rather quickly. It's almost like I announced the beginning of the implementation yesterday. *It's actually not even 24 hours prior from now...*
+During implementation, several design changes were made. Detailed documentation for the final design architecture is schedule to be written later, once the final completeion of Grid System had arrived (after all bug fixes and benchmark), so here's a brief overview:
+- Grid Index Array is constructed directly from secondary sort.
+- \[P01\]: Instead of constructing a grid system array to access the position buffer indirectly in the future, rearrange the position array directly during secondary sort to match the grid system layout. Effectively sorting the position buffer. This way the extra memory footprint of the grid system array is now reduced, as well as the indirection overhead for future access.
+- Added a single threaded pre-process (`constructSecondarySortMeta_impl`) prior to Secondary Sort to calculate all meta data required for Secondary Sort Counting (`constructSecondarySortBucketIndex_impl`)
+At this point, although the general logic of Grid System was completed, there are still several following tasks to be completed:
+- Fix buffer size / capacity mismatch bug (potential refactor from `std::vector` to `tx::BasicStorage`)
+- Handle Out-of-Bound object edge case - When objects are out of the `[-1, 1)` range
+- Integrate with the engine
+  - Implement grid based collision handling loop

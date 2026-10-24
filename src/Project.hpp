@@ -1,6 +1,7 @@
 // Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
 
 #pragma once
+#include "impl/data_utils.hpp"
 #include "infrastructure.hpp"
 #include "impl/geom_utils.hpp"
 #include "impl/geometry.hpp"
@@ -10,6 +11,7 @@
 #include <bit>
 #include <bits/stdc++.h>
 #include <cmath>
+#include <exception>
 #include <memory>
 #include <type_traits>
 
@@ -27,10 +29,10 @@ struct EngineParameters {
 	u32 MaxEntityCount = 10000;
 	u32 SubstepCount = 8;
 	u32 ThreadCount = 20;
+	f32 ObjectRadius = 0.008f;
 };
 // all configuration that are not required to construct the engine
 struct EngineConfig {
-	f32 ObjectRadius = 0.008f;
 	f32 Gravity = 0.0001f;
 	f32 Friction = 0.999f;
 	f32 Restitution = 0.9f;
@@ -40,11 +42,13 @@ class Engine {
 public:
 	Engine() = default;
 	Engine(EngineParameters param, EngineConfig config)
-	    : m_param(param.SubstepCount),
+	    : m_param(param.SubstepCount, param.ObjectRadius,
+	              lastPowTwo(static_cast<u32>(std::ceil(1.0 / param.ObjectRadius)))),
 	      m_data(tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
 	             tx::AlternatingBuffer<vec2>(param.MaxEntityCount)),
 	      m_config(config), m_threads(param.ThreadCount),
-	      m_gs(param.MaxEntityCount, m_threads) {}
+	      m_gs(param.MaxEntityCount, m_param.GridSideCellCount,
+	           m_threads, GridSystemBufferSorter_impl{ &m_data }) {}
 
 public:
 	// ################ Main Loop Interface ################
@@ -86,8 +90,11 @@ public:
 private:
 	// ################ Runtime Data ################
 
+	// determinded at construction
 	struct Parameters_impl {
 		u32 SubstepCount;
+		f32 ObjectRadius;
+		u32 GridSideCellCount;
 	} m_param;
 
 	struct Data_impl {
@@ -103,7 +110,20 @@ private:
 	EngineConfig m_config;
 
 private:
-	// ================ Concurrency ================
+	// ################ Grid System Sorter ################
+	// Sort the arrays according to the result of grid system update
+	// for grid system construct secondary sort
+
+	struct GridSystemBufferSorter_impl {
+		Data_impl* m_data;
+		void operator()(u32 prev, u32 curr) {
+			m_data->pos.buffer(1)[curr] = m_data->pos.buffer(0)[prev];
+			m_data->prevPos.buffer(1)[curr] = m_data->prevPos.buffer(0)[prev];
+		}
+	};
+
+private:
+	// ################ Concurrency ################
 
 	struct TaskGSConstructGridPos {
 		struct Argument {
@@ -120,7 +140,7 @@ private:
 				    tx::ZGridToIndex(findGridPos(*(arg.src + i), arg.SideCellCount));
 			}
 		}
-		uvec2 findGridPos(vec2 pos, f32 SideCellCount) {
+		static uvec2 findGridPos(vec2 pos, f32 SideCellCount) {
 			return tx::toCoord<u32>((pos + vec2(1.0f)) * 0.5f * SideCellCount);
 		}
 	};
@@ -145,8 +165,114 @@ private:
 			// construct psa (SIMDable)
 			u32 acc = arg.begin;
 			for (u32 i = 0; i < arg.RadixBucketCount; i++) {
+				u32 old = acc;
 				acc += arg.dest[i];
-				arg.dest[i] = acc;
+				arg.dest[i] = old;
+			}
+		}
+	};
+
+	struct TaskGSConstructPrimarySortSort {
+		struct Argument {
+			u32 RadixDigit;
+			u32* indexArray; // BucketIndex
+			u32* src; // gridPos, size = size
+			u32* dest; // Bucket, size = size
+			u32* id; // ObjectID, size = size
+			u32 size;
+			u32 idBegin; // id base
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			u32 id = arg.idBegin;
+			for (u32 i = 0; i < arg.size; i++) {
+				u32 radix = GridSystem_impl::radixLowerBits(
+				    arg.src[i], arg.RadixDigit);
+				u32 index = arg.indexArray[radix]++;
+				arg.dest[index] = GridSystem_impl::radixHigherBits(
+				    arg.src[i], arg.RadixDigit);
+				arg.id[index] = id++;
+			}
+		}
+	};
+
+	struct TaskGSConstructSecondarySortBucketIndex {
+		struct Argument {
+			u32 RadixDigit;
+			u32 RadixBucketCount;
+			u32 begin; // psa base
+			u32* index; // root of primarySortBucketIndex
+			u32 indexStrideOffset;
+			u32 indexStrideSize; // distribution
+			u32 indexStrideCount; // thread count
+			u32* src; // root of primary sort bucket
+			u32* dest; // size = RadixBucketCount; BucketIndex
+			u32* indexDest; // root of grid system indexArray
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			std::fill(arg.dest, arg.dest + arg.RadixBucketCount, 0);
+			// counting
+			for (u32 stride = 0; stride < arg.indexStrideCount; stride++) {
+				// for each stride
+
+				// i is the logical index in one bucket. also the lower bits of
+				// the original grid index
+				for (u32 i = arg.indexStrideOffset;
+				     i < arg.indexStrideSize + arg.indexStrideOffset;
+				     i++) {
+					// for every bucket in index
+					u32 primaryIndex = i + stride * arg.RadixBucketCount;
+
+					for (u32 j = arg.index[primaryIndex];
+					     j < arg.index[primaryIndex + 1]; j++) {
+						// for every element in the bucket
+
+						arg.dest[arg.src[j]]++; // counting secondary bucket size
+						// counting gridPos occurance
+						// constructing grid system indexArray
+						arg.indexDest[i | (arg.src[j] << arg.RadixDigit)]++;
+					}
+				}
+			}
+
+			// construct psa
+			u32 acc = arg.begin;
+			for (u32 i = 0; i < arg.RadixBucketCount; i++) {
+				u32 old = acc;
+				acc += arg.dest[i];
+				arg.dest[i] = old;
+			}
+		}
+	};
+
+	struct TaskGSConstructSecondarySortSort {
+		struct Argument {
+			u32 RadixBucketCount;
+			u32* primaryIndex; // first stride in primarySortBucketIndex
+			u32 primaryIndexStrideSize; // distribution
+			u32 primaryIndexStrideCount; // thread count
+			u32* src; // root of primary sort bucket
+			u32* id; // root of primary object id
+			u32* index; // BucketIndex
+			GridSystemBufferSorter_impl sorter;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			u32 index = 0; // index in primary index array
+			while (arg.primaryIndexStrideCount--) {
+				u32 begin = index;
+				index += arg.primaryIndexStrideSize; // index is now end
+
+				for (u32 i = arg.primaryIndex[begin]; i < arg.primaryIndex[index]; i++) {
+					// for each element in primary sort bucket
+					arg.sorter(arg.id[i], arg.index[arg.src[i]]++);
+				}
+
+				index += arg.RadixBucketCount;
 			}
 		}
 	};
@@ -166,7 +292,10 @@ private:
 	using TaskList = tx::type_list_t<
 	    TaskFence,
 	    TaskGSConstructGridPos,
-	    TaskGSConstructPrimarySortBucketIndex>;
+	    TaskGSConstructPrimarySortBucketIndex,
+	    TaskGSConstructPrimarySortSort,
+	    TaskGSConstructSecondarySortBucketIndex,
+	    TaskGSConstructSecondarySortSort>;
 
 	template <class T>
 	using ThreadArgumentExtract_t = typename T::Argument;
@@ -219,20 +348,8 @@ private:
 		return sq(a.x - b.x) + sq(a.y - b.y) < sq(dist);
 	}
 	bool isColliding(u32 a, u32 b) {
-		return isColliding(m_data.pos[a], m_data.pos[b], m_config.ObjectRadius * 2);
+		return isColliding(m_data.pos[a], m_data.pos[b], m_param.ObjectRadius * 2);
 	}
-
-private:
-	// ################ Grid System Sorter ################
-	// Sort the arrays according to the result of grid system update
-
-	struct GridSystemBufferSorter_impl {
-		Data_impl* m_data;
-		void operator()(u32 prev, u32 curr) {
-			m_data->pos.buffer(1)[curr] = m_data->pos.buffer(0)[prev];
-			m_data->prevPos.buffer(1)[curr] = m_data->prevPos.buffer(0)[prev];
-		}
-	};
 
 private:
 	// ################ Grid System ################
@@ -242,7 +359,7 @@ private:
 		// ================ Task Utility ================
 
 		static u32 radixLowerBits(u32 val, u32 RadixDigit) {
-			return val & (~0x0 << RadixDigit);
+			return val & ((u32{ 1 } << RadixDigit) - 1);
 		}
 		static u32 radixHigherBits(u32 val, u32 RadixDigit) {
 			return val >> RadixDigit;
@@ -252,17 +369,21 @@ private:
 		// ================ Lifetime ================
 
 		GridSystem_impl() = default;
-		GridSystem_impl(u32 MaxEntityCount, std::span<Thread> threads)
-		    : m_source({ {}, threads, Distributor(threads) }) {
-			constructState_impl(MaxEntityCount);
-			constructBuffers_impl(MaxEntityCount);
+		GridSystem_impl(u32 MaxEntityCount, u32 SideCellCount,
+		                std::span<Thread> threads,
+		                GridSystemBufferSorter_impl sorter)
+		    : m_source({ {}, threads, Distributor(threads), sorter }) {
+			constructState_impl(MaxEntityCount, SideCellCount);
+			constructBuffers_impl(MaxEntityCount, SideCellCount);
 		}
 
 	public:
 		// ================ Public Accessor ================
 
-		tx::PackedPartedView<u32> view() {
-			return tx::PackedPartedView<u32>(array.data(), indexArray.data());
+		template <class T>
+		tx::PackedPartedView<T> view(T* ptr) {
+			return tx::PackedPartedView<T>(
+			    ptr, indexArray.data(), indexArray.size());
 		}
 
 	public:
@@ -276,7 +397,6 @@ private:
 	private:
 		// ================ Grid System Data ================
 
-		std::vector<u32> array;
 		std::vector<u32> indexArray;
 
 	private:
@@ -286,6 +406,7 @@ private:
 			std::span<const vec2> pos;
 			std::span<Thread> threads;
 			Distributor distor;
+			GridSystemBufferSorter_impl sorter;
 		} m_source;
 
 		struct State_impl {
@@ -303,22 +424,44 @@ private:
 			std::vector<u32> primarySortBucket;
 			std::vector<u32> primarySortObjectID;
 			std::vector<u32> primarySortBucketIndex;
+			std::vector<u32> secondarySortBucketIndex;
+			std::vector<u32> secondarySortDistribution; // per thread in bucket index
+			std::vector<u32> secondarySortPSABase; // per thread part size in element
 		} m_data;
 
-		void constructState_impl(u32 n) {
-			m_state.SideCellCount =
-			    tx::nextPowTwo(static_cast<u32>(std::ceil(std::sqrt(n))));
-			m_state.RadixDigit = std::bit_width(n) / 2;
-			m_state.RadixBucketCount = tx::powi(2, m_state.RadixDigit);
+		void constructState_impl(u32 n, u32 gn) {
+			m_state.SideCellCount = gn;
+			m_state.RadixBucketCount = gn;
+			m_state.RadixDigit = std::bit_width(sq(gn) - 1) / 2;
 		}
-		void constructBuffers_impl(u32 n) {
-			array.resize(n);
-			indexArray.resize(n);
+		void constructBuffers_impl(u32 n, u32 gn) {
+			indexArray.resize(sq(gn));
 			m_data.gridPos.resize(n);
 			m_data.primarySortBucket.resize(n);
 			m_data.primarySortObjectID.resize(n);
 			m_data.primarySortBucketIndex.resize(
-			    m_state.RadixBucketCount * m_source.threads.size() + 1);
+			    m_state.RadixBucketCount * m_source.threads.size() + 2);
+			m_data.primarySortBucketIndex[0] = 0;
+			m_data.secondarySortBucketIndex.resize(
+			    m_state.RadixBucketCount * m_source.threads.size() + 2);
+			m_data.secondarySortBucketIndex[0] = 0;
+			m_data.secondarySortDistribution.resize(m_source.threads.size());
+			m_data.secondarySortPSABase.resize(m_source.threads.size());
+		}
+
+	private:
+		// ================ Helpers ================
+
+		// DevNote: Switch to std::latch for the entire fence system
+		// Func: threaded directly to tx::distributePartitions
+		template <class Func>
+		void dispatchProcess(u32 size, Func&& f) {
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(), [this, &f, size] {
+				    tx::distributePartitions(
+				        size, m_source.threads.size(),
+				        std::forward<Func>(f));
+			    });
 		}
 
 	private:
@@ -327,46 +470,146 @@ private:
 		void construct_impl() {
 			m_source.distor.reset();
 			constructGridPos_impl();
+			constructPrimarySort_impl();
+			constructSecondarySort_impl();
 		}
 
 		void constructGridPos_impl() {
-			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(), [this] {
-				    tx::distributePartitions(
-				        m_source.pos.size(), m_source.threads.size(),
-				        [this](u32 begin, u32 end) {
-					        threadAssignFenced_impl<TaskGSConstructGridPos>(
-					            m_source.distor, m_state.threadStatusCounter,
-					            TaskGSConstructGridPos::Argument{
-					                m_source.pos.data() + begin,
-					                m_data.gridPos.data() + begin, end - begin,
-					                m_state.SideCellCount });
-				        });
+			dispatchProcess(
+			    m_source.pos.size(), [this](u32 begin, u32 end) {
+				    threadAssignFenced_impl<TaskGSConstructGridPos>(
+				        m_source.distor, m_state.threadStatusCounter,
+				        TaskGSConstructGridPos::Argument{
+				            m_source.pos.data() + begin,
+				            m_data.gridPos.data() + begin, end - begin,
+				            m_state.SideCellCount });
 			    });
 		}
 
 		void constructPrimarySort_impl() {
 			constructPrimarySortBucketIndex_impl();
+			constructParimarySortSort_impl();
 		}
 		// counting
 		void constructPrimarySortBucketIndex_impl() {
+			dispatchProcess(
+			    m_data.gridPos.size(), [this](u32 begin, u32 end, u32 tIndex) {
+				    threadAssignFenced_impl<TaskGSConstructPrimarySortBucketIndex>(
+				        m_source.distor, m_state.threadStatusCounter,
+				        TaskGSConstructPrimarySortBucketIndex::Argument{
+				            m_state.RadixDigit, m_state.RadixBucketCount,
+				            begin, m_data.gridPos.data() + begin, end - begin,
+				            m_data.primarySortBucketIndex.data() + 1 +
+				                tIndex * m_state.RadixBucketCount });
+			    });
+		}
+		// sorting
+		void constructParimarySortSort_impl() {
+			dispatchProcess(
+			    m_data.gridPos.size(), [this](u32 begin, u32 end, u32 tIndex) {
+				    threadAssignFenced_impl<TaskGSConstructPrimarySortSort>(
+				        m_source.distor, m_state.threadStatusCounter,
+				        TaskGSConstructPrimarySortSort::Argument{
+				            m_state.RadixDigit,
+				            m_data.primarySortBucketIndex.data() + 1 +
+				                tIndex * m_state.RadixBucketCount,
+				            m_data.gridPos.data() + begin,
+				            m_data.primarySortBucket.data() + begin,
+				            m_data.primarySortObjectID.data() + begin,
+				            end - begin, begin });
+			    });
+		}
+
+		void constructSecondarySort_impl() {
+			constructSecondarySortMeta_impl();
+			constructSecondarySortBucketIndex_impl();
+			constructSecondarySortSort_impl();
+		}
+		void constructSecondarySortMeta_impl() {
+			tx::distributePartitionsAligned(
+			    m_state.RadixBucketCount, m_source.threads.size(),
+			    tx::CacheLineCapacity<u32>,
+			    [this](u32 begin, u32 end, u32 tIndex) {
+				    m_data.secondarySortDistribution[tIndex] = end - begin;
+				    m_data.secondarySortPSABase[tIndex] = 0;
+				    for (u32 i = 0; i < m_source.threads.size(); i++) {
+					    m_data.secondarySortPSABase[tIndex] +=
+					        m_data.primarySortBucketIndex[end + i * m_state.RadixBucketCount] -
+					        m_data.primarySortBucketIndex[begin + i * m_state.RadixBucketCount];
+				    }
+			    });
+			// construct psa
+			u32 acc = 0;
+			for (u32 i = 0; i < m_data.secondarySortPSABase.size(); i++) {
+				u32 old = acc;
+				acc += m_data.secondarySortPSABase[i];
+				m_data.secondarySortPSABase[i] = old;
+			}
+		}
+		void constructSecondarySortBucketIndex_impl() {
+			std::fill(indexArray.begin(), indexArray.end(), 0);
 			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(), [this] {
-				    tx::distributePartitions(
-				        m_data.gridPos.size(), m_source.threads.size(),
-				        [this](u32 begin, u32 end, u32 tIndex) {
-					        threadAssignFenced_impl<TaskGSConstructPrimarySortBucketIndex>(
-					            m_source.distor, m_state.threadStatusCounter,
-					            TaskGSConstructPrimarySortBucketIndex::Argument{
-					                m_state.RadixDigit, m_state.RadixBucketCount,
-					                begin, m_data.gridPos.data() + begin, end - begin,
-					                m_data.primarySortBucketIndex.data() + 1 +
-					                    tIndex * m_state.RadixBucketCount });
-				        });
+			    m_state.threadStatusCounter, m_source.threads.size(),
+			    [this] {
+				    u32 acc = 0;
+				    for (u32 i = 0; i < m_data.secondarySortDistribution.size(); i++) {
+					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndex>(
+					        m_source.distor, m_state.threadStatusCounter,
+					        TaskGSConstructSecondarySortBucketIndex::Argument{
+					            m_state.RadixDigit, m_state.RadixBucketCount,
+					            m_data.secondarySortPSABase[i],
+					            m_data.primarySortBucketIndex.data(), acc,
+					            m_data.secondarySortDistribution[i],
+					            static_cast<u32>(m_data.secondarySortDistribution.size()),
+					            m_data.primarySortBucket.data(),
+					            m_data.secondarySortBucketIndex.data() +
+					                i * m_state.RadixBucketCount,
+					            indexArray.data() });
+					    acc += m_data.secondarySortDistribution[i];
+				    }
+			    });
+		}
+		void constructSecondarySortSort_impl() {
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(),
+			    [this] {
+				    u32 acc = 0;
+				    for (u32 i = 0; i < m_data.secondarySortDistribution.size(); i++) {
+					    threadAssignFenced_impl<TaskGSConstructSecondarySortSort>(
+					        m_source.distor, m_state.threadStatusCounter,
+					        TaskGSConstructSecondarySortSort::Argument{
+					            m_state.RadixBucketCount,
+					            m_data.primarySortBucketIndex.data() + acc,
+					            m_data.secondarySortDistribution[i],
+					            static_cast<u32>(m_data.secondarySortDistribution.size()),
+					            m_data.primarySortBucket.data(),
+					            m_data.primarySortObjectID.data(),
+					            m_data.secondarySortBucketIndex.data() +
+					                i * m_state.RadixBucketCount,
+					            m_source.sorter });
+					    acc += m_data.secondarySortDistribution[i];
+				    }
 			    });
 		}
 
 	} m_gs;
+
+private:
+	// ################ Grid System Debugging ################
+
+	void checkGSValid_impl() {
+		tx::PackedPartedView view = m_gs.view(m_data.pos.data());
+		for (u32 i = 0; i < view.size(); i++) {
+			std::span<vec2> s = view[i];
+			for (vec2 v : s) {
+				if (i != tx::ZGridToIndex(TaskGSConstructGridPos::findGridPos(
+				             v, m_param.GridSideCellCount))) {
+					std::cerr << "[Error]: GS check failed!" << std::endl;
+					std::terminate();
+				}
+			}
+		}
+	}
 
 private:
 	// ################ Logic Implementation ################
@@ -416,7 +659,7 @@ private:
 		vec2 nuv = tx::normalize(diff, dist);
 
 		// push apart
-		f32 overlap = (m_config.ObjectRadius * 2 - dist) * 0.5f;
+		f32 overlap = (m_param.ObjectRadius * 2 - dist) * 0.5f;
 		vec2 push = overlap * nuv;
 
 		m_data.pos[a] += push;
@@ -442,8 +685,9 @@ private:
 
 /**
  * Optimization Idea:
- * - Ensure all buffer's Cache line alignment
+ * - [P02] Ensure all buffer's Cache line alignment
+ * - [P03] Arena and huge page
  * Grid System:
- * - (adopted) instead of making a grid system array, rearrange the position array
+ * - [P01] (adopted) instead of making a grid system array, rearrange the position array
  *   directly. Effectively sorting the position buffer.
  */
