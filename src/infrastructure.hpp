@@ -121,6 +121,8 @@ private:
 	// Re-implementing ring buffer here because access to the foundational
 	// indices are required.
 
+	tx::BasicStorage<T, Allocator> m_storage;
+
 	alignas(CacheLineSize) struct {
 		alignas(CacheLineSize) struct {
 			std::atomic<u32> begin = 0;
@@ -134,9 +136,6 @@ private:
 		} producer;
 		alignas(CacheLineSize) std::atomic<bool> producerSleeping = false;
 	} m_state;
-
-private:
-	tx::BasicStorage<T, Allocator> m_storage;
 
 private:
 	template <class Self>
@@ -228,8 +227,8 @@ public:
 
 	TaskThread(const TaskThread& other) = delete;
 	TaskThread& operator=(const TaskThread& other) = delete;
-	TaskThread(TaskThread&& other) = default;
-	TaskThread& operator=(TaskThread&& other) = default;
+	TaskThread(TaskThread&& other) = delete;
+	TaskThread& operator=(TaskThread&& other) = delete;
 
 public:
 	// ================ Public Interface ================
@@ -276,14 +275,34 @@ void distributePartitions(u32 size, u32 partCount, Func&& f) {
 	u32 remainder = size - partLen * partCount;
 	u32 begin = 0;
 	u32 threadIndex = 0;
-	for (u32 i = 0; i < partCount - remainder; i++) {
-		invoke(begin, begin + partLen, threadIndex++);
-		begin += partLen;
-	}
 	for (u32 i = 0; i < remainder; i++) {
 		invoke(begin, begin + partLen + 1, threadIndex++);
 		begin += partLen + 1;
 	}
+	for (u32 i = 0; i < partCount - remainder; i++) {
+		invoke(begin, begin + partLen, threadIndex++);
+		begin += partLen;
+	}
+}
+template <class Func>
+    requires std::invocable<Func, u32, u32> ||
+             std::invocable<Func, u32, u32, u32>
+void distributePartitionsAligned(u32 size, u32 partCount, u32 alignment, Func&& f) {
+	u32 alignedPartCount = size / alignment;
+	u32 remainder = size - alignedPartCount * alignment;
+
+	distributePartitions(
+	    alignedPartCount, partCount, [&](u32 begin, u32 end, u32 i) {
+		    auto invoke = [&](u32 a, u32 b, u32 c) {
+			    if constexpr (std::invocable<Func, u32, u32>)
+				    f(a, b);
+			    else
+				    f(a, b, c);
+		    };
+		    invoke(begin * alignment,
+		           end * alignment + remainder * (i + 1 == partCount),
+		           i);
+	    });
 }
 
 template <class Argument, tx::instantiation_of<TaskThread> Thread>
@@ -395,7 +414,8 @@ template <class T>
 class PackedPartedView {
 public:
 	PackedPartedView() = default;
-	PackedPartedView(T* data, const u32* meta) : m_data(data), m_meta(meta) {}
+	PackedPartedView(T* data, const u32* meta, u32 metaSize)
+	    : m_data(data), m_meta(meta), m_metaSize(metaSize) {}
 
 	PackedPartedView(const PackedPartedView& other) = default;
 	PackedPartedView& operator=(const PackedPartedView& other) = default;
@@ -415,9 +435,12 @@ public:
 		                    data + *(meta + partIndex + 1));
 	}
 
+	u32 size() const { return m_metaSize; }
+
 private:
 	T* m_data = nullptr;
 	const u32* m_meta = nullptr;
+	const u32 m_metaSize = 0;
 };
 
 template <class T>
@@ -500,9 +523,9 @@ private:
 
 public:
 	AlternatingBuffer() = default;
-	AlternatingBuffer(u32 bufferSize, u32 bufferCount = 2, Allocator alloc = Allocator{})
-	    : m_alloc(std::move(alloc)),
-	      m_data(bufferSize * bufferCount, alloc),
+	AlternatingBuffer(u32 bufferSize, u32 bufferCount = 2,
+	                  Allocator alloc = Allocator{})
+	    : m_data(bufferSize * bufferCount, alloc),
 	      m_bufferSize(bufferSize), m_bufferCount(bufferCount) {
 	}
 
@@ -522,11 +545,7 @@ public:
 	auto end(this Self&& self) { return self.buffer().end(); }
 
 private:
-	using alloc_traits = tx::typed_allocator_traits<Allocator, T>;
-	Allocator m_alloc;
-
-private:
-	tx::BasicStorage<T> m_data;
+	tx::BasicStorage<T, Allocator> m_data;
 	i32 m_index = 0;
 	u32 m_bufferSize = 0, m_bufferCount = 0;
 };

@@ -108,11 +108,12 @@ void LuaApplication::exposeEngineConfig_impl() {
 	m_impl->lua.new_usertype<tx::ParticleDynamics::EngineParameters>(
 	    "EngineParameter",
 	    "MaxEntityCount", &tx::ParticleDynamics::EngineParameters::MaxEntityCount,
-	    "SubstepCount", &tx::ParticleDynamics::EngineParameters::SubstepCount);
+	    "SubstepCount", &tx::ParticleDynamics::EngineParameters::SubstepCount,
+	    "ThreadCount", &tx::ParticleDynamics::EngineParameters::ThreadCount,
+	    "ObjectRadius", &tx::ParticleDynamics::EngineParameters::ObjectRadius);
 
 	m_impl->lua.new_usertype<tx::ParticleDynamics::EngineConfig>(
 	    "EngineConfig",
-	    "ObjectRadius", &tx::ParticleDynamics::EngineConfig::ObjectRadius,
 	    "Gravity", &tx::ParticleDynamics::EngineConfig::Gravity,
 	    "Friction", &tx::ParticleDynamics::EngineConfig::Friction,
 	    "Restitution", &tx::ParticleDynamics::EngineConfig::Restitution);
