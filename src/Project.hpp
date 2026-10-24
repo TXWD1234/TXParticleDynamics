@@ -323,6 +323,41 @@ private:
 		}
 	};
 
+	struct TaskGSConstructSecondarySortIndexArraySum {
+		struct Argument {
+			u32* src;
+			u32 srcSize;
+			u32* res;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			u32 sum = 0;
+			for (u32 i = 0; i < arg.srcSize; i++) {
+				sum += arg.src[i];
+			}
+			*arg.res = sum;
+		}
+	};
+
+	struct TaskGSConstructSecondarySortIndexArrayPSA {
+		struct Argument {
+			u32* src;
+			u32 srcSize;
+			u32 psaBase;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			u32 acc = arg.psaBase;
+			for (u32 i = 0; i < arg.srcSize; i++) {
+				u32 old = acc;
+				acc += arg.src[i];
+				arg.src[i] = old;
+			}
+		}
+	};
+
 	struct TaskFence {
 		struct Argument {
 			std::atomic<u32>* counter;
@@ -342,7 +377,9 @@ private:
 	    TaskGSConstructPrimarySortBucketIndex,
 	    TaskGSConstructPrimarySortSort,
 	    TaskGSConstructSecondarySortBucketIndex,
-	    TaskGSConstructSecondarySortSort>;
+	    TaskGSConstructSecondarySortSort,
+	    TaskGSConstructSecondarySortIndexArraySum,
+	    TaskGSConstructSecondarySortIndexArrayPSA>;
 
 	template <class T>
 	using ThreadArgumentExtract_t = typename T::Argument;
@@ -473,6 +510,7 @@ private:
 			};
 			template <class T>
 			using SBuffer = tx::BasicStorage<T>;
+
 			// when reading names in here, add an imaginary "Array" suffix
 
 			SBuffer<u32> sourcePSABase;
@@ -486,6 +524,7 @@ private:
 			SBuffer<u32> secondarySortBucketIndex;
 			SBuffer<u32> secondarySortDistribution; // per thread in bucket index
 			SBuffer<u32> secondarySortPSABase; // per thread part size in element
+			SBuffer<u32> secondarySortIndexArraySum;
 
 			/**
 			 * primarySortBucket and primarySortObjectID have dynamic size, but
@@ -516,6 +555,7 @@ private:
 			m_data.secondarySortBucketIndex.data[0] = 0;
 			m_data.secondarySortDistribution = Data_impl::SBuffer<u32>(t);
 			m_data.secondarySortPSABase = Data_impl::SBuffer<u32>(t);
+			m_data.secondarySortIndexArraySum = Data_impl::SBuffer<u32>(t);
 		}
 
 	private:
@@ -530,6 +570,16 @@ private:
 				    tx::distributePartitions(
 				        size, m_source.threads.size(),
 				        std::forward<Func>(f));
+			    });
+		}
+		template <class Func>
+		void dispatchProcessAligned(u32 size, u32 alignment, Func&& f) {
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(),
+			    [this, &f, size, alignment] {
+				    tx::distributePartitionsAligned(
+				        size, m_source.threads.size(),
+				        alignment, std::forward<Func>(f));
 			    });
 		}
 
@@ -721,6 +771,36 @@ private:
 				    }
 			    });
 		}
+		// construct psa of index array
+		void constructSecondarySortIndexArray_impl() {
+			dispatchProcessAligned(
+			    indexArray.size(), tx::CacheLineCapacity<u32>,
+			    [this](u32 begin, u32 end, u32 tIndex) {
+				    threadAssignFenced_impl<
+				        TaskGSConstructSecondarySortIndexArraySum>(
+				        m_source.distor, m_state.threadStatusCounter,
+				        TaskGSConstructSecondarySortIndexArraySum::Argument{
+				            indexArray.data() + begin, end - begin,
+				            m_data.secondarySortIndexArraySum.data + tIndex });
+			    });
+			u32 acc = 0;
+			for (u32 i = 0; i < m_data.secondarySortIndexArraySum.size; i++) {
+				u32 old = acc;
+				acc += m_data.secondarySortIndexArraySum.data[i];
+				m_data.secondarySortIndexArraySum.data[i] = old;
+			}
+			dispatchProcessAligned(
+			    indexArray.size(), tx::CacheLineCapacity<u32>,
+			    [this](u32 begin, u32 end, u32 tIndex) {
+				    threadAssignFenced_impl<
+				        TaskGSConstructSecondarySortIndexArrayPSA>(
+				        m_source.distor, m_state.threadStatusCounter,
+				        TaskGSConstructSecondarySortIndexArrayPSA::Argument{
+				            indexArray.data() + begin, end - begin,
+				            *(m_data.secondarySortIndexArraySum.data + tIndex) });
+			    });
+		}
+
 
 	} m_gs;
 
