@@ -1,6 +1,7 @@
 // Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
 
 #pragma once
+#include "impl/basic_storage.hpp"
 #include "impl/data_utils.hpp"
 #include "infrastructure.hpp"
 #include "impl/geom_utils.hpp"
@@ -125,23 +126,69 @@ private:
 private:
 	// ################ Concurrency ################
 
-	struct TaskGSConstructGridPos {
+	struct TaskGSConstructSourceGridPos {
 		struct Argument {
 			const vec2* src;
 			u32* dest;
 			u32 size;
-			u32 SideCellCount;
+			u32 SideCellCount; // must be pow2
 		};
 		template <class... Args>
 		void operator()(std::variant<Args...>& varg) {
 			Argument& arg = std::get<Argument>(varg);
 			for (u32 i = 0; i < arg.size; i++) {
+				uvec2 gridPos = findGridPos(*(arg.src + i), arg.SideCellCount);
+				u32 xSentinel = findSentinel(gridPos.x, arg.SideCellCount);
+				u32 ySentinel = findSentinel(gridPos.y, arg.SideCellCount);
 				(*(arg.dest + i)) =
-				    tx::ZGridToIndex(findGridPos(*(arg.src + i), arg.SideCellCount));
+				    tx::ZGridToIndex(uvec2(
+				        gridPos.x | xSentinel | ySentinel,
+				        gridPos.y | xSentinel | ySentinel));
 			}
 		}
 		static uvec2 findGridPos(vec2 pos, f32 SideCellCount) {
 			return tx::toCoord<u32>((pos + vec2(1.0f)) * 0.5f * SideCellCount);
+		}
+		// check if v as a x/y coordinate is out of bound
+		// produces 0b1111111111111111 when out of bound
+		//         0b10000000000000000 otherwise
+		static u32 findSentinel(u32 v, u32 SideCellCount) {
+			return (u32{ 1 } << 16) - bool(v >> std::bit_width(SideCellCount - 1));
+		}
+		/**
+		 * Handling out-of-range particles
+		 * The grid system only spans the range of [-1, 1), and any particles
+		 * with position outisde of that range are considered out-of-range.
+		 * The policy chosen for out-of-range particles is simply ignore them.
+		 * 
+		 * To avoid branching, the above bit operation abomination was created.
+		 * The invariant it produces is: When a particle is out-of-range, its
+		 * grid system index is exactly 0xFFFFFFFF.
+		 */
+	};
+
+	struct TaskGSConstructSourceCompose {
+		struct Argument {
+			u32* destGridPos;
+			u32* destObjectID;
+			u32* src; // grid pos raw
+			u32 srcSize;
+			u32 idBase;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			u32 dest = 0;
+			for (u32 i = 0; i < arg.srcSize; i++) {
+				// arg.destGridPos[dest] = arg.src[i];
+				// arg.destObjectID[dest] = i + arg.idBase;
+				// dest += arg.src[i] != u32{ 0xFFFFFFFF };
+				if (arg.src[i] != u32{ 0xFFFFFFFF }) {
+					arg.destGridPos[dest] = arg.src[i];
+					arg.destObjectID[dest] = i + arg.idBase;
+					dest++;
+				}
+			}
 		}
 	};
 
@@ -180,19 +227,18 @@ private:
 			u32* dest; // Bucket, size = size
 			u32* id; // ObjectID, size = size
 			u32 size;
-			u32 idBegin; // id base
+			u32* idSrc; // sourceObjectID
 		};
 		template <class... Args>
 		void operator()(std::variant<Args...>& varg) {
 			Argument& arg = std::get<Argument>(varg);
-			u32 id = arg.idBegin;
 			for (u32 i = 0; i < arg.size; i++) {
 				u32 radix = GridSystem_impl::radixLowerBits(
 				    arg.src[i], arg.RadixDigit);
 				u32 index = arg.indexArray[radix]++;
 				arg.dest[index] = GridSystem_impl::radixHigherBits(
 				    arg.src[i], arg.RadixDigit);
-				arg.id[index] = id++;
+				arg.id[index] = arg.idSrc[i];
 			}
 		}
 	};
@@ -233,7 +279,7 @@ private:
 						arg.dest[arg.src[j]]++; // counting secondary bucket size
 						// counting gridPos occurance
 						// constructing grid system indexArray
-						arg.indexDest[i | (arg.src[j] << arg.RadixDigit)]++;
+						arg.indexDest[(arg.src[j] << arg.RadixDigit) | i]++;
 					}
 				}
 			}
@@ -291,7 +337,8 @@ private:
 
 	using TaskList = tx::type_list_t<
 	    TaskFence,
-	    TaskGSConstructGridPos,
+	    TaskGSConstructSourceGridPos,
+	    TaskGSConstructSourceCompose,
 	    TaskGSConstructPrimarySortBucketIndex,
 	    TaskGSConstructPrimarySortSort,
 	    TaskGSConstructSecondarySortBucketIndex,
@@ -374,7 +421,7 @@ private:
 		                GridSystemBufferSorter_impl sorter)
 		    : m_source({ {}, threads, Distributor(threads), sorter }) {
 			constructState_impl(MaxEntityCount, SideCellCount);
-			constructBuffers_impl(MaxEntityCount, SideCellCount);
+			constructBuffers_impl(MaxEntityCount, SideCellCount, threads.size());
 		}
 
 	public:
@@ -400,7 +447,7 @@ private:
 		std::vector<u32> indexArray;
 
 	private:
-		// ================ Update Buffers ================
+		// ================ Construction Data ================
 
 		struct Source_impl {
 			std::span<const vec2> pos;
@@ -418,15 +465,33 @@ private:
 		} m_state;
 
 		struct Data_impl {
+			// dynamic buffer that consist a element count member
+			template <class T>
+			struct DBuffer : public tx::BasicStorage<T> {
+				using BasicStorage<T>::BasicStorage;
+				u32 count = 0;
+			};
+			template <class T>
+			using SBuffer = tx::BasicStorage<T>;
 			// when reading names in here, add an imaginary "Array" suffix
 
-			std::vector<u32> gridPos;
-			std::vector<u32> primarySortBucket;
-			std::vector<u32> primarySortObjectID;
-			std::vector<u32> primarySortBucketIndex;
-			std::vector<u32> secondarySortBucketIndex;
-			std::vector<u32> secondarySortDistribution; // per thread in bucket index
-			std::vector<u32> secondarySortPSABase; // per thread part size in element
+			SBuffer<u32> sourcePSABase;
+			DBuffer<u32> sourceGridPosRaw;
+			DBuffer<u32> sourceGridPos;
+			DBuffer<u32> sourceObjectID;
+			SBuffer<u32> primarySortBucket; // {Buckets}[ThreadCount]
+			SBuffer<u32> primarySortObjectID; // parallel to primarySortBucket
+			// [RadixBucketCount][ThreadCount]
+			SBuffer<u32> primarySortBucketIndex; // store global index in bucket
+			SBuffer<u32> secondarySortBucketIndex;
+			SBuffer<u32> secondarySortDistribution; // per thread in bucket index
+			SBuffer<u32> secondarySortPSABase; // per thread part size in element
+
+			/**
+			 * primarySortBucket and primarySortObjectID have dynamic size, but
+			 * because they are always accessed via index array, their size
+			 * does not matter, therefore are SBuffer but not DBuffer.
+			 */
 		} m_data;
 
 		void constructState_impl(u32 n, u32 gn) {
@@ -434,19 +499,23 @@ private:
 			m_state.RadixBucketCount = gn;
 			m_state.RadixDigit = std::bit_width(sq(gn) - 1) / 2;
 		}
-		void constructBuffers_impl(u32 n, u32 gn) {
+		void constructBuffers_impl(u32 n, u32 gn, u32 t) {
 			indexArray.resize(sq(gn));
-			m_data.gridPos.resize(n);
-			m_data.primarySortBucket.resize(n);
-			m_data.primarySortObjectID.resize(n);
-			m_data.primarySortBucketIndex.resize(
-			    m_state.RadixBucketCount * m_source.threads.size() + 2);
-			m_data.primarySortBucketIndex[0] = 0;
-			m_data.secondarySortBucketIndex.resize(
-			    m_state.RadixBucketCount * m_source.threads.size() + 2);
-			m_data.secondarySortBucketIndex[0] = 0;
-			m_data.secondarySortDistribution.resize(m_source.threads.size());
-			m_data.secondarySortPSABase.resize(m_source.threads.size());
+			m_data.sourcePSABase = Data_impl::SBuffer<u32>(t + 1);
+			m_data.sourcePSABase.data[0] = 0;
+			m_data.sourceGridPosRaw = Data_impl::DBuffer<u32>(n);
+			m_data.sourceGridPos = Data_impl::DBuffer<u32>(n);
+			m_data.sourceObjectID = Data_impl::DBuffer<u32>(n);
+			m_data.primarySortBucket = Data_impl::DBuffer<u32>(n);
+			m_data.primarySortObjectID = Data_impl::DBuffer<u32>(n);
+			m_data.primarySortBucketIndex = Data_impl::SBuffer<u32>(
+			    m_state.RadixBucketCount * t + 2);
+			m_data.primarySortBucketIndex.data[0] = 0;
+			m_data.secondarySortBucketIndex = Data_impl::SBuffer<u32>(
+			    m_state.RadixBucketCount * t + 2);
+			m_data.secondarySortBucketIndex.data[0] = 0;
+			m_data.secondarySortDistribution = Data_impl::SBuffer<u32>(t);
+			m_data.secondarySortPSABase = Data_impl::SBuffer<u32>(t);
 		}
 
 	private:
@@ -469,20 +538,54 @@ private:
 
 		void construct_impl() {
 			m_source.distor.reset();
-			constructGridPos_impl();
+			constructSource_impl();
 			constructPrimarySort_impl();
 			constructSecondarySort_impl();
 		}
 
-		void constructGridPos_impl() {
+		void constructSource_impl() {
+			constructSourceGridPosRaw_impl();
+			constructSourceMeta_impl();
+			constructSourceCompose_impl();
+		}
+		void constructSourceGridPosRaw_impl() {
+			m_data.sourceGridPosRaw.count = m_source.pos.size();
 			dispatchProcess(
 			    m_source.pos.size(), [this](u32 begin, u32 end) {
-				    threadAssignFenced_impl<TaskGSConstructGridPos>(
+				    threadAssignFenced_impl<TaskGSConstructSourceGridPos>(
 				        m_source.distor, m_state.threadStatusCounter,
-				        TaskGSConstructGridPos::Argument{
+				        TaskGSConstructSourceGridPos::Argument{
 				            m_source.pos.data() + begin,
-				            m_data.gridPos.data() + begin, end - begin,
+				            m_data.sourceGridPosRaw.data + begin, end - begin,
 				            m_state.SideCellCount });
+			    });
+		}
+		void constructSourceMeta_impl() {
+			tx::distributePartitions(
+			    m_data.sourceGridPosRaw.count, m_source.threads.size(),
+			    [this](u32 begin, u32 end, u32 tIndex) {
+				    // count valid grid pos in range and construct psa
+				    tIndex++;
+				    m_data.sourcePSABase.data[tIndex] =
+				        m_data.sourcePSABase.data[tIndex - 1];
+				    for (u32 i = begin; i < end; i++) {
+					    m_data.sourcePSABase.data[tIndex] +=
+					        m_data.sourceGridPosRaw.data[i] != u32{ 0xFFFFFFFF };
+				    }
+			    });
+			m_data.sourceGridPos.count =
+			    m_data.sourcePSABase.data[m_data.sourcePSABase.size - 1];
+			m_data.sourceObjectID.count = m_data.sourceGridPos.count;
+		}
+		void constructSourceCompose_impl() {
+			dispatchProcess(
+			    m_data.sourceGridPosRaw.count, [this](u32 begin, u32 end, u32 tIndex) {
+				    threadAssignFenced_impl<TaskGSConstructSourceCompose>(
+				        m_source.distor, m_state.threadStatusCounter,
+				        TaskGSConstructSourceCompose::Argument{
+				            m_data.sourceGridPos.data + m_data.sourcePSABase.data[tIndex],
+				            m_data.sourceObjectID.data + m_data.sourcePSABase.data[tIndex],
+				            m_data.sourceGridPosRaw.data + begin, end - begin, begin });
 			    });
 		}
 
@@ -493,32 +596,48 @@ private:
 		// counting
 		void constructPrimarySortBucketIndex_impl() {
 			dispatchProcess(
-			    m_data.gridPos.size(), [this](u32 begin, u32 end, u32 tIndex) {
+			    m_data.sourceGridPos.count, [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<TaskGSConstructPrimarySortBucketIndex>(
 				        m_source.distor, m_state.threadStatusCounter,
 				        TaskGSConstructPrimarySortBucketIndex::Argument{
 				            m_state.RadixDigit, m_state.RadixBucketCount,
-				            begin, m_data.gridPos.data() + begin, end - begin,
-				            m_data.primarySortBucketIndex.data() + 1 +
+				            begin, m_data.sourceGridPos.data + begin, end - begin,
+				            m_data.primarySortBucketIndex.data + 1 +
 				                tIndex * m_state.RadixBucketCount });
 			    });
 		}
 		// sorting
 		void constructParimarySortSort_impl() {
 			dispatchProcess(
-			    m_data.gridPos.size(), [this](u32 begin, u32 end, u32 tIndex) {
+			    m_data.sourceGridPos.count, [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<TaskGSConstructPrimarySortSort>(
 				        m_source.distor, m_state.threadStatusCounter,
 				        TaskGSConstructPrimarySortSort::Argument{
 				            m_state.RadixDigit,
-				            m_data.primarySortBucketIndex.data() + 1 +
+				            m_data.primarySortBucketIndex.data + 1 +
 				                tIndex * m_state.RadixBucketCount,
-				            m_data.gridPos.data() + begin,
-				            m_data.primarySortBucket.data() + begin,
-				            m_data.primarySortObjectID.data() + begin,
-				            end - begin, begin });
+				            m_data.sourceGridPos.data + begin,
+				            m_data.primarySortBucket.data + begin,
+				            m_data.primarySortObjectID.data + begin,
+				            end - begin, m_data.sourceObjectID.data + begin });
 			    });
 		}
+
+		/**
+		 * The transformation of m_data.primarySortBucketIndex array
+		 * Upon close inspection, a consistent pattern appears during primary
+		 * sort: all references to primary sort bucket index duuring primary
+		 * sort has an offset of 1. which means there's an untouched slot at
+		 * the very start of the bucket index array with constant value of 0.
+		 * After primary sort, all indices in primary bucket index array
+		 * becomes end, which means the entire thing effectively shifted left
+		 * by one slot. and now in secondary sort, all references to primary
+		 * sort are without the 1 slot offset, which means now that one slot
+		 * at the front became the one slot erased by previously shifting it
+		 * to left by one slot. and the value of that slot is always 0, since
+		 * it's an exclusive psa. therefore during the secondary sort, the
+		 * primary bucket index is still a perfect exlusive psa.
+		 */
 
 		void constructSecondarySort_impl() {
 			constructSecondarySortMeta_impl();
@@ -530,42 +649,53 @@ private:
 			    m_state.RadixBucketCount, m_source.threads.size(),
 			    tx::CacheLineCapacity<u32>,
 			    [this](u32 begin, u32 end, u32 tIndex) {
-				    m_data.secondarySortDistribution[tIndex] = end - begin;
-				    m_data.secondarySortPSABase[tIndex] = 0;
+				    m_data.secondarySortDistribution.data[tIndex] = end - begin;
+				    m_data.secondarySortPSABase.data[tIndex] = 0;
 				    for (u32 i = 0; i < m_source.threads.size(); i++) {
-					    m_data.secondarySortPSABase[tIndex] +=
-					        m_data.primarySortBucketIndex[end + i * m_state.RadixBucketCount] -
-					        m_data.primarySortBucketIndex[begin + i * m_state.RadixBucketCount];
+					    m_data.secondarySortPSABase.data[tIndex] +=
+					        m_data.primarySortBucketIndex.data[end + i * m_state.RadixBucketCount] -
+					        m_data.primarySortBucketIndex.data[begin + i * m_state.RadixBucketCount];
 				    }
 			    });
 			// construct psa
 			u32 acc = 0;
-			for (u32 i = 0; i < m_data.secondarySortPSABase.size(); i++) {
+			for (u32 i = 0; i < m_data.secondarySortPSABase.size; i++) {
 				u32 old = acc;
-				acc += m_data.secondarySortPSABase[i];
-				m_data.secondarySortPSABase[i] = old;
+				acc += m_data.secondarySortPSABase.data[i];
+				m_data.secondarySortPSABase.data[i] = old;
 			}
 		}
+		/**
+		 * Also constructs grid system indexArray.
+		 * False sharing when writing into indexArray is avoided by deliberate
+		 * design:
+		 * Each thread handles a certain count of complete buckets from primary
+		 * sort, which are also the lower bits of the grid index. Which means,
+		 * every thread writes to contiguous strides in indexArray. And by
+		 * partitioning the buckets such that every thread process bucket count
+		 * that are multiples of a cache line size, false sharing is completely
+		 * avoided.
+		 */
 		void constructSecondarySortBucketIndex_impl() {
 			std::fill(indexArray.begin(), indexArray.end(), 0);
 			threadRunFencedProcess_impl(
 			    m_state.threadStatusCounter, m_source.threads.size(),
 			    [this] {
 				    u32 acc = 0;
-				    for (u32 i = 0; i < m_data.secondarySortDistribution.size(); i++) {
+				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndex>(
 					        m_source.distor, m_state.threadStatusCounter,
 					        TaskGSConstructSecondarySortBucketIndex::Argument{
 					            m_state.RadixDigit, m_state.RadixBucketCount,
-					            m_data.secondarySortPSABase[i],
-					            m_data.primarySortBucketIndex.data(), acc,
-					            m_data.secondarySortDistribution[i],
-					            static_cast<u32>(m_data.secondarySortDistribution.size()),
-					            m_data.primarySortBucket.data(),
-					            m_data.secondarySortBucketIndex.data() +
+					            m_data.secondarySortPSABase.data[i],
+					            m_data.primarySortBucketIndex.data, acc,
+					            m_data.secondarySortDistribution.data[i],
+					            static_cast<u32>(m_data.secondarySortDistribution.size),
+					            m_data.primarySortBucket.data,
+					            m_data.secondarySortBucketIndex.data +
 					                i * m_state.RadixBucketCount,
 					            indexArray.data() });
-					    acc += m_data.secondarySortDistribution[i];
+					    acc += m_data.secondarySortDistribution.data[i];
 				    }
 			    });
 		}
@@ -574,20 +704,20 @@ private:
 			    m_state.threadStatusCounter, m_source.threads.size(),
 			    [this] {
 				    u32 acc = 0;
-				    for (u32 i = 0; i < m_data.secondarySortDistribution.size(); i++) {
+				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortSort>(
 					        m_source.distor, m_state.threadStatusCounter,
 					        TaskGSConstructSecondarySortSort::Argument{
 					            m_state.RadixBucketCount,
-					            m_data.primarySortBucketIndex.data() + acc,
-					            m_data.secondarySortDistribution[i],
-					            static_cast<u32>(m_data.secondarySortDistribution.size()),
-					            m_data.primarySortBucket.data(),
-					            m_data.primarySortObjectID.data(),
-					            m_data.secondarySortBucketIndex.data() +
+					            m_data.primarySortBucketIndex.data + acc,
+					            m_data.secondarySortDistribution.data[i],
+					            static_cast<u32>(m_data.secondarySortDistribution.size),
+					            m_data.primarySortBucket.data,
+					            m_data.primarySortObjectID.data,
+					            m_data.secondarySortBucketIndex.data +
 					                i * m_state.RadixBucketCount,
 					            m_source.sorter });
-					    acc += m_data.secondarySortDistribution[i];
+					    acc += m_data.secondarySortDistribution.data[i];
 				    }
 			    });
 		}
@@ -602,7 +732,7 @@ private:
 		for (u32 i = 0; i < view.size(); i++) {
 			std::span<vec2> s = view[i];
 			for (vec2 v : s) {
-				if (i != tx::ZGridToIndex(TaskGSConstructGridPos::findGridPos(
+				if (i != tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
 				             v, m_param.GridSideCellCount))) {
 					std::cerr << "[Error]: GS check failed!" << std::endl;
 					std::terminate();
@@ -687,6 +817,8 @@ private:
  * Optimization Idea:
  * - [P02] Ensure all buffer's Cache line alignment
  * - [P03] Arena and huge page
+ * - [P04] Parallelize meta construction
+ * - [P05] Branchless TaskGSConstructSourceCompose / AVX-512 vpcompressd
  * Grid System:
  * - [P01] (adopted) instead of making a grid system array, rearrange the position array
  *   directly. Effectively sorting the position buffer.
