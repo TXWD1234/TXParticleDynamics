@@ -247,7 +247,6 @@ private:
 		struct Argument {
 			u32 RadixDigit;
 			u32 RadixBucketCount;
-			u32 begin; // psa base
 			u32* index; // root of primarySortBucketIndex
 			u32 indexStrideOffset;
 			u32 indexStrideSize; // distribution
@@ -493,8 +492,8 @@ private:
 		                std::span<Thread> threads,
 		                GridSystemBufferSorter_impl sorter)
 		    : m_source({ {}, threads, Distributor(threads), sorter }) {
-			constructState_impl(MaxEntityCount, SideCellCount);
-			constructBuffers_impl(MaxEntityCount, SideCellCount, threads.size());
+			initState_impl(MaxEntityCount, SideCellCount);
+			initBuffers_impl(MaxEntityCount, SideCellCount, threads.size());
 		}
 
 	public:
@@ -546,6 +545,9 @@ private:
 			};
 			template <class T>
 			using SBuffer = tx::BasicStorage<T>;
+			// constant buffer init once at startup
+			template <class T>
+			using CBuffer = tx::BasicStorage<T>;
 
 			// when reading names in here, add an imaginary "Array" suffix
 
@@ -559,8 +561,7 @@ private:
 			SBuffer<u32> primarySortBucketIndex; // store global index in bucket
 			SBuffer<u32> secondarySortBucketIndex;
 			SBuffer<u32> secondarySortBucketIndexSum;
-			SBuffer<u32> secondarySortDistribution; // per thread in bucket index
-			SBuffer<u32> secondarySortPSABase; // per thread part size in element
+			CBuffer<u32> secondarySortDistribution; // per thread in bucket index
 			SBuffer<u32> secondarySortIndexArraySum;
 
 			/**
@@ -570,12 +571,12 @@ private:
 			 */
 		} m_data;
 
-		void constructState_impl(u32 n, u32 gn) {
+		void initState_impl(u32 n, u32 gn) {
 			m_state.SideCellCount = gn;
 			m_state.RadixBucketCount = gn;
 			m_state.RadixDigit = std::bit_width(sq(gn) - 1) / 2;
 		}
-		void constructBuffers_impl(u32 n, u32 gn, u32 t) {
+		void initBuffers_impl(u32 n, u32 gn, u32 t) {
 			indexArray.resize(sq(gn) + 1);
 			m_data.sourcePSABase = Data_impl::SBuffer<u32>(t + 1);
 			m_data.sourcePSABase.data[0] = 0;
@@ -591,9 +592,16 @@ private:
 			    m_state.RadixBucketCount * t);
 			m_data.secondarySortBucketIndexSum = Data_impl::SBuffer<u32>(
 			    m_state.RadixBucketCount + 1);
-			m_data.secondarySortDistribution = Data_impl::SBuffer<u32>(t);
-			m_data.secondarySortPSABase = Data_impl::SBuffer<u32>(t);
+			m_data.secondarySortDistribution = Data_impl::CBuffer<u32>(t);
 			m_data.secondarySortIndexArraySum = Data_impl::SBuffer<u32>(t);
+		}
+		void initConstBuffers_impl() {
+			tx::distributePartitionsAligned(
+			    m_state.RadixBucketCount, m_source.threads.size(),
+			    tx::CacheLineCapacity<u32>,
+			    [this](u32 begin, u32 end, u32 tIndex) {
+				    m_data.secondarySortDistribution.data[tIndex] = end - begin;
+			    });
 		}
 
 	private:
@@ -728,32 +736,10 @@ private:
 		 */
 
 		void constructSecondarySort_impl() {
-			constructSecondarySortMeta_impl();
 			constructSecondarySortBucketElementCount_impl();
 			constructSecondarySortBucketIndex_impl();
 			constructSecondarySortSort_impl();
 			constructSecondarySortIndexArray_impl();
-		}
-		void constructSecondarySortMeta_impl() {
-			tx::distributePartitionsAligned(
-			    m_state.RadixBucketCount, m_source.threads.size(),
-			    tx::CacheLineCapacity<u32>,
-			    [this](u32 begin, u32 end, u32 tIndex) {
-				    m_data.secondarySortDistribution.data[tIndex] = end - begin;
-				    m_data.secondarySortPSABase.data[tIndex] = 0;
-				    for (u32 i = 0; i < m_source.threads.size(); i++) {
-					    m_data.secondarySortPSABase.data[tIndex] +=
-					        m_data.primarySortBucketIndex.data[end + i * m_state.RadixBucketCount] -
-					        m_data.primarySortBucketIndex.data[begin + i * m_state.RadixBucketCount];
-				    }
-			    });
-			// construct psa <------------------ obsolete
-			u32 acc = 0;
-			for (u32 i = 0; i < m_data.secondarySortPSABase.size; i++) {
-				u32 old = acc;
-				acc += m_data.secondarySortPSABase.data[i];
-				m_data.secondarySortPSABase.data[i] = old;
-			}
 		}
 		/**
 		 * Counts the element of each thread partition.
@@ -781,7 +767,6 @@ private:
 					        m_source.distor, m_state.threadStatusCounter,
 					        TaskGSConstructSecondarySortBucketElementCount::Argument{
 					            m_state.RadixDigit, m_state.RadixBucketCount,
-					            m_data.secondarySortPSABase.data[i],
 					            m_data.primarySortBucketIndex.data, begin,
 					            m_data.secondarySortDistribution.data[i],
 					            m_data.secondarySortDistribution.size,
