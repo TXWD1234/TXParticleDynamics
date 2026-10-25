@@ -23,11 +23,7 @@ LuaApplication::LuaApplication(
     std::string_view path)
     : m_impl(std::make_unique<Impl>()),
       m_path(path) { init_impl(); }
-LuaApplication::LuaApplication() = default;
 LuaApplication::~LuaApplication() = default;
-
-LuaApplication::LuaApplication(LuaApplication&& other) = default;
-LuaApplication& LuaApplication::operator=(LuaApplication&& other) = default;
 
 void LuaApplication::configure(
     const std::function<EngineCollection(

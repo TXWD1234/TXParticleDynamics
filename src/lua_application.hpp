@@ -16,13 +16,14 @@ struct EngineCollection {
 
 class LuaApplication {
 public:
-	LuaApplication();
 	LuaApplication(
 	    std::string_view path);
 	~LuaApplication();
 
-	LuaApplication(LuaApplication&& other);
-	LuaApplication& operator=(LuaApplication&& other);
+	LuaApplication(const LuaApplication& other) = delete;
+	LuaApplication& operator=(const LuaApplication& other) = delete;
+	LuaApplication(LuaApplication&& other) = delete;
+	LuaApplication& operator=(LuaApplication&& other) = delete;
 
 public:
 	// ================ Engine Facing Interface ================

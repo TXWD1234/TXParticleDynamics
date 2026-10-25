@@ -366,11 +366,13 @@ inline u32 pdep_u32(u32 x, u32 y) {
 #ifdef MACRO_PDEP_Available
 	return _pdep_u32(x, y);
 #endif
+	return 0;
 }
 inline u32 pext_u32(u32 x, u32 y) {
 #ifdef MACRO_PDEP_Available
 	return _pext_u32(x, y);
 #endif
+	return 0;
 }
 } // namespace intrin
 

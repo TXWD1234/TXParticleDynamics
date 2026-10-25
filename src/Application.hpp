@@ -10,6 +10,7 @@
 #include "impl/geometry.hpp"
 #include "tx/json.h"
 #include <iostream>
+#include <optional>
 
 class Application {
 private:
@@ -96,31 +97,31 @@ private:
 				return 0;
 			}
 		}
-		lua = tx::ParticleDynamics::LuaApplication(demoPath);
-		lua.configure([this](tx::ParticleDynamics::LuaApplication::EngineArg engineArg,
-		                     tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
-		                  -> tx::ParticleDynamics::EngineCollection {
-			engine = tx::ParticleDynamics::Engine(engineArg.param, engineArg.config);
-			re.init(reArg.param, reArg.config);
-			return { &engine, &re };
+		lua.emplace(demoPath);
+		lua->configure([this](tx::ParticleDynamics::LuaApplication::EngineArg engineArg,
+		                      tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
+		                   -> tx::ParticleDynamics::EngineCollection {
+			engine.emplace(engineArg.param, engineArg.config);
+			re.emplace(reArg.param, reArg.config);
+			return { &engine.value(), &re.value() };
 		});
-		lua.init();
+		lua->init();
 
 		return 1;
 	}
 
 
 
-	tx::ParticleDynamics::Engine engine;
-	tx::ParticleDynamics::RenderEngine re;
-	tx::ParticleDynamics::LuaApplication lua;
+	std::optional<tx::ParticleDynamics::Engine> engine;
+	std::optional<tx::ParticleDynamics::RenderEngine> re;
+	std::optional<tx::ParticleDynamics::LuaApplication> lua;
 
 	void update() {
-		lua.runtime();
-		engine.update();
+		lua->runtime();
+		engine->update();
 	}
 	void render() {
-		engine.draw([this](std::span<tx::vec2> _) { re.draw(_); });
+		engine->draw([this](std::span<tx::vec2> _) { re->draw(_); });
 	}
 };
 

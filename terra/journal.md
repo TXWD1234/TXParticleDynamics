@@ -412,3 +412,31 @@ At this point, although the general logic of Grid System was completed, there ar
 - Handle Out-of-Bound object edge case - When objects are out of the `[-1, 1)` range
 - Integrate with the engine
   - Implement grid based collision handling loop
+
+## 2026-10-25 12:09:50:<br>Category: Research Report<br>Topic: Solving the object member initialization problem with `std::optional`
+Thoughout my development of engines and libraries in C++, a long standing problem always bothers me.
+Imagine having an instance of a object (Engine) which requires a very complicated logic to make it's constructor arguments, and it is to be stored as the member of another object (Parent). The problem is, that complicated logic must be excuted in a function, and if you put it in the constructor body of Parent, the Engine object was previously default constructed.
+There are several methods I've tried to solve this, namely:
+- Provide default construction and move semantics in Engine, and move assign the default initialized Engine instance. *Flaw: if engine haas any self reference or pointers created during it's construction, those pointers become dangling after move.*
+- Provide default construction and explicit `init()` function to initialize. *Flaw: ahrd to maintain, redundent syntax and don't work for any dependency that does not follow this exact same pattern (the pattern must propagate both downstream and upstream)*
+- Use `std::unqiue_ptr` to store the Engine. *Flaw: Indirection overhead and WHY DO YOU EVEN USE A POINTER????*
+- Do everything in initializer list by using lambda or static method to contain the logic. *Flaw: Access of a static function is relatively limited and it also mess up initializing order. Also it don't work in cases where there are too many members, because then the syntax bloat will become unbearable.*
+
+Eventually, after all that suffering and searching in darkness, I've found the perfect saving grace C++ offers: **`std::optional`**
+It's very similar to the `std::unique_ptr` method, but instead of a heap allocation, `std::optional` holds a local, inlined buffer of `std::byte[sizeof(T)]`, and thus achieving `std::unique_ptr`'s almost perfect initialization defering interface with zero overhead.
+```cpp
+class Engine {
+	Engine(...) {}
+	// move_copy_semantics deleted
+};
+
+class Parent {
+public:
+	Parent() {
+		// complicated logic
+		engine.emplace(...);
+	}
+private:
+	std::optional<Engine> engine;
+};
+```

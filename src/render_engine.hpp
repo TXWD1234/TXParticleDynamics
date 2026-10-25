@@ -21,8 +21,7 @@ struct RenderEngineConfig {
 
 class RenderEngine {
 public:
-	RenderEngine() = default;
-	void init(RenderEngineParameters param, RenderEngineConfig config) {
+	RenderEngine(RenderEngineParameters param, RenderEngineConfig config) {
 		m_config = config;
 		re.init();
 		rr = re.createSectionProxy(
@@ -31,6 +30,11 @@ public:
 		initColorBuffer_impl(param.Color);
 		m_derivedConfig.ColorEnabled = param.Color.Enabled;
 	}
+
+	RenderEngine(const RenderEngine& other) = delete;
+	RenderEngine& operator=(const RenderEngine& other) = delete;
+	RenderEngine(RenderEngine&& other) = delete;
+	RenderEngine& operator=(RenderEngine&& other) = delete;
 
 private:
 	// ================ Config ================
