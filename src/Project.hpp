@@ -1,16 +1,15 @@
 // Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
 
 #pragma once
+#include "infrastructure.hpp"
 #include "impl/basic_storage.hpp"
 #include "impl/data_utils.hpp"
-#include "infrastructure.hpp"
 #include "impl/geom_utils.hpp"
 #include "impl/geometry.hpp"
 #include "impl/numeric_utils.hpp"
 #include "tx/type_traits.hpp"
 #include <atomic>
 #include <bit>
-#include <bits/stdc++.h>
 #include <cmath>
 #include <exception>
 #include <memory>
@@ -41,15 +40,21 @@ struct EngineConfig {
 
 class Engine {
 public:
-	Engine() = default;
 	Engine(EngineParameters param, EngineConfig config)
 	    : m_param(param.SubstepCount, param.ObjectRadius,
 	              lastPowTwo(static_cast<u32>(std::ceil(1.0 / param.ObjectRadius)))),
 	      m_data(tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
 	             tx::AlternatingBuffer<vec2>(param.MaxEntityCount)),
 	      m_config(config), m_threads(param.ThreadCount),
+	      m_distor(m_threads),
 	      m_gs(param.MaxEntityCount, m_param.GridSideCellCount,
-	           m_threads, GridSystemBufferSorter_impl{ &m_data }) {}
+	           m_threads, GridSystemBufferSorter_impl{ &m_data },
+	           m_state.threadStatusCounter.get()) {}
+
+	Engine(const Engine& other) = delete;
+	Engine& operator=(const Engine& other) = delete;
+	Engine(Engine&& other) = delete;
+	Engine& operator=(Engine&& other) = delete;
 
 public:
 	// ################ Main Loop Interface ################
@@ -113,13 +118,14 @@ private:
 	EngineConfig m_config;
 
 private:
-	// ################ Grid System Sorter ################
+	// ################ Grid System Callable Helpers ################
+
 	// Sort the arrays according to the result of grid system update
 	// for grid system construct secondary sort
-
 	struct GridSystemBufferSorter_impl {
 		Data_impl* m_data;
 		void operator()(u32 prev, u32 curr) {
+
 			m_data->pos.buffer(1)[curr] = m_data->pos.buffer(0)[prev];
 			m_data->prevPos.buffer(1)[curr] = m_data->prevPos.buffer(0)[prev];
 		}
@@ -400,18 +406,16 @@ private:
 
 	struct TaskGSBridgeCopyInvObject {
 		struct Argument {
-			u32* src;
-			u32 srcSize;
-			u32 psaBase;
+			u32* src; // indices
+			u32 size;
+			u32 destBegin; // offseted
+			GridSystemBufferSorter_impl sorter;
 		};
 		template <class... Args>
 		void operator()(std::variant<Args...>& varg) {
 			Argument& arg = std::get<Argument>(varg);
-			u32 acc = arg.psaBase;
-			for (u32 i = 0; i < arg.srcSize; i++) {
-				u32 old = acc;
-				acc += arg.src[i];
-				arg.src[i] = old;
+			for (u32 i = 0; i < arg.size; i++) {
+				arg.sorter(arg.src[i], arg.destBegin + i);
 			}
 		}
 	};
@@ -439,7 +443,8 @@ private:
 	    TaskGSConstructSecondarySortBucketIndexPSA,
 	    TaskGSConstructSecondarySortSort,
 	    TaskGSConstructSecondarySortIndexArraySum,
-	    TaskGSConstructSecondarySortIndexArrayPSA>;
+	    TaskGSConstructSecondarySortIndexArrayPSA,
+	    TaskGSBridgeCopyInvObject>;
 
 	template <class T>
 	using ThreadArgumentExtract_t = typename T::Argument;
@@ -455,6 +460,7 @@ private:
 	using Distributor = TaskThreadDistributor<ThreadArgument, Thread>;
 
 	std::vector<Thread> m_threads;
+	Distributor m_distor;
 
 	// ================ Concurrency Helpers ================
 
@@ -498,6 +504,21 @@ private:
 			    tx::distributePartitionsAligned(
 			        size, threadCount, alignment, std::forward<Func>(f));
 		    });
+	}
+
+	// ================ Local Helpers ================
+
+	template <class Func>
+	void dispatchProcess_impl(u32 size, Func&& f) {
+		threadDispatchProcess_impl(
+		    size, m_state.threadStatusCounter.get(),
+		    m_threads.size(), std::forward<Func>(f));
+	}
+	template <class Func>
+	void dispatchProcessAligned_impl(u32 size, u32 align, Func&& f) {
+		threadDispatchProcessAligned_impl(
+		    size, m_state.threadStatusCounter.get(),
+		    m_threads.size(), align, std::forward<Func>(f));
 	}
 
 private:
@@ -552,6 +573,8 @@ private:
 			return tx::PackedPartedView<T>(
 			    ptr, indexArray.data(), indexArray.size());
 		}
+		u32 objectCount() { return indexArray.back(); }
+
 		std::span<u32> invalidObjects() { return std::span<u32>(
 			m_data.sourceInvalidID.data, m_data.sourceInvalidID.count); }
 
@@ -661,6 +684,8 @@ private:
 		}
 
 	private:
+		// ================ Local Helpers ================
+
 		template <class Func>
 		void dispatchProcess_impl(u32 size, Func&& f) {
 			threadDispatchProcess_impl(
@@ -931,7 +956,21 @@ private:
 	void updateGS_impl() {
 		m_gs.update(m_data.pos);
 		// copy invalid objects to final array
-		std::span<u32> invids = m_gs.invalidObjects();
+		std::span<u32> invids = m_gs.invalidObjects(); // invalid ids
+		u32 destBegin = m_gs.objectCount();
+
+		dispatchProcessAligned_impl(
+		    invids.size(), tx::CacheLineCapacity<u32>,
+		    [this, invids, destBegin](u32 begin, u32 end) {
+			    threadAssignFenced_impl<TaskGSBridgeCopyInvObject>(
+			        m_distor, m_state.threadStatusCounter.get(),
+			        TaskGSBridgeCopyInvObject::Argument{
+			            invids.data() + begin, end - begin, destBegin + begin,
+			            GridSystemBufferSorter_impl{ &m_data } });
+		    });
+
+		m_data.pos.swap();
+		m_data.prevPos.swap();
 	}
 
 private:
@@ -940,8 +979,7 @@ private:
 	void checkGSValid_impl() {
 		tx::PackedPartedView view = m_gs.view(m_data.pos.data());
 		for (u32 i = 0; i < view.partition_size(); i++) {
-			std::span<vec2> s = view[i];
-			for (vec2 v : s) {
+			for (vec2 v : view[i]) {
 				if (i != tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
 				             v, m_param.GridSideCellCount))) {
 					std::cerr << "[Error]: GS check failed!" << std::endl;
@@ -959,6 +997,9 @@ private:
 		while (substep--) {
 			updateGravity_impl(dt);
 			updateObject_impl();
+
+			updateGS_impl();
+			checkGSValid_impl(); // DevNote: debug
 			updateCollision_impl();
 		}
 	}
@@ -1024,11 +1065,12 @@ private:
 } // namespace tx::ParticleDynamics
 
 /**
- * Optimization Idea:
+ * TODO:
  * - [P02] Ensure all buffer's Cache line alignment
  * - [P03] Arena and huge page
  * - [P04] Parallelize meta construction
  * - [P05] Branchless TaskGSConstructSourceCompose / AVX-512 vpcompressd
+ * - [I01] Align invalid object with cache line - begin offset
  * Grid System:
  * - [P01] (adopted) instead of making a grid system array, rearrange the position array
  *   directly. Effectively sorting the position buffer.
