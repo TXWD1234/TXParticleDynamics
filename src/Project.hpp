@@ -2,6 +2,7 @@
 
 #pragma once
 #include "infrastructure.hpp"
+#include "debug.hpp"
 #include "impl/basic_storage.hpp"
 #include "impl/data_utils.hpp"
 #include "impl/geom_utils.hpp"
@@ -125,7 +126,7 @@ private:
 	struct GridSystemBufferSorter_impl {
 		Data_impl* m_data;
 		void operator()(u32 prev, u32 curr) {
-
+			//debugger.push(prev, curr);
 			m_data->pos.buffer(1)[curr] = m_data->pos.buffer(0)[prev];
 			m_data->prevPos.buffer(1)[curr] = m_data->prevPos.buffer(0)[prev];
 		}
@@ -303,7 +304,7 @@ private:
 			u32 RadixBucketCount;
 			u32* src; // first entry in first stride in BucketIndex
 			u32 srcStrideSize;
-			u32* res; // bucket index sum (with + 1 pffset)
+			u32* res; // bucket index sum
 		};
 		template <class... Args>
 		void operator()(std::variant<Args...>& varg) {
@@ -324,7 +325,7 @@ private:
 			u32 RadixBucketCount;
 			u32* src; // first entry in first stride in BucketIndex
 			u32 srcStrideSize;
-			u32* sum; // bucket index sum (without offset)
+			u32* sum; // bucket index sum
 		};
 		template <class... Args>
 		void operator()(std::variant<Args...>& varg) {
@@ -354,17 +355,12 @@ private:
 		template <class... Args>
 		void operator()(std::variant<Args...>& varg) {
 			Argument& arg = std::get<Argument>(varg);
-			u32 index = 0; // index in primary index array
-			while (arg.primaryIndexStrideCount--) {
-				u32 begin = index;
-				index += arg.primaryIndexStrideSize; // index is now end
-
-				for (u32 i = arg.primaryIndex[begin]; i < arg.primaryIndex[index]; i++) {
-					// for each element in primary sort bucket
-					arg.sorter(arg.id[i], arg.index[arg.src[i]]++);
+			for (u32 bucket = 0; bucket < arg.primaryIndexStrideSize; bucket++) {
+				for (u32 stride = 0; stride < arg.primaryIndexStrideCount; stride++) {
+					u32 index = bucket + stride * arg.RadixBucketCount;
+					for (u32 i = arg.primaryIndex[index]; i < arg.primaryIndex[index + 1]; i++)
+						arg.sorter(arg.id[i], arg.index[arg.src[i]]++);
 				}
-
-				index += arg.RadixBucketCount;
 			}
 		}
 	};
@@ -670,7 +666,7 @@ private:
 			m_data.secondarySortBucketIndex = Data_impl::SBuffer<u32>(
 			    m_state.RadixBucketCount * t);
 			m_data.secondarySortBucketIndexSum = Data_impl::SBuffer<u32>(
-			    m_state.RadixBucketCount + 1);
+			    m_state.RadixBucketCount);
 			m_data.secondarySortDistribution = Data_impl::CBuffer<u32>(t);
 			m_data.secondarySortIndexArraySum = Data_impl::SBuffer<u32>(t);
 		}
@@ -790,8 +786,8 @@ private:
 				            m_data.primarySortBucketIndex.data + 1 +
 				                tIndex * m_state.RadixBucketCount,
 				            m_data.sourceGridPos.data + begin,
-				            m_data.primarySortBucket.data + begin,
-				            m_data.primarySortObjectID.data + begin,
+				            m_data.primarySortBucket.data,
+				            m_data.primarySortObjectID.data,
 				            end - begin, m_data.sourceObjectID.data + begin });
 			    });
 		}
@@ -877,6 +873,12 @@ private:
 					    begin += m_data.secondarySortDistribution.data[i];
 				    }
 			    });
+			u32 acc = 0;
+			for (u32 i = 0; i < m_state.RadixBucketCount; i++) {
+				u32 old = acc;
+				acc += m_data.secondarySortBucketIndexSum.data[i];
+				m_data.secondarySortBucketIndexSum.data[i] = old;
+			}
 			threadRunFencedProcess_impl(
 			    m_source.threadStatusCounter, m_source.threads.size(),
 			    [this] {
@@ -954,7 +956,16 @@ private:
 	// ################ Grid System Bridging ################
 
 	void updateGS_impl() {
-		m_gs.update(m_data.pos);
+		// std::fill(m_data.pos.buffer(1).begin(), m_data.pos.buffer(1).end(), vec2{ 2.0f, 2.0f }); // debug
+		m_gs.update(std::span(
+		    m_data.pos.data(), m_data.pos.data() + m_state.objectCount));
+		// debugger.save("/home/TX_Jerry/Programming/dev/TXParticleDynamics/build/bin/debug.txt");
+		// debugger.terminate();
+
+		m_data.pos.swap(); // debug
+		m_data.prevPos.swap(); // debug
+		return; // debug
+
 		// copy invalid objects to final array
 		std::span<u32> invids = m_gs.invalidObjects(); // invalid ids
 		u32 destBegin = m_gs.objectCount();
@@ -977,16 +988,26 @@ private:
 	// ################ Grid System Debugging ################
 
 	void checkGSValid_impl() {
+		updateGS_impl();
 		tx::PackedPartedView view = m_gs.view(m_data.pos.data());
+		// u32 partition_size = view.partition_size(); // debug
+		// u32 element_size = view.element_size(); // debug
 		for (u32 i = 0; i < view.partition_size(); i++) {
-			for (vec2 v : view[i]) {
-				if (i != tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
-				             v, m_param.GridSideCellCount))) {
-					std::cerr << "[Error]: GS check failed!" << std::endl;
-					std::terminate();
+			std::span s = view[i];
+			for (u32 j = 0; j < s.size(); j++) {
+				u32 actual = tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
+				    s[j], m_param.GridSideCellCount));
+				if (i != actual) {
+					//std::cerr << "[Error]: GS check failed!" << std::endl;
+					debugger.push(
+					    { s[j], i, actual, (u32)s.size() });
+
+					//debugger.terminate(); // debug
 				}
 			}
 		}
+		debugger.save("/home/TX_Jerry/Programming/dev/TXParticleDynamics/build/bin/debug.txt");
+		debugger.terminate();
 	}
 
 private:
@@ -998,7 +1019,6 @@ private:
 			updateGravity_impl(dt);
 			updateObject_impl();
 
-			updateGS_impl();
 			checkGSValid_impl(); // DevNote: debug
 			updateCollision_impl();
 		}

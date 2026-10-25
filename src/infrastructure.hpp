@@ -437,7 +437,7 @@ public:
 		                    data + *(meta + partIndex + 1));
 	}
 
-	u32 partition_size() const { return m_metaSize; }
+	u32 partition_size() const { return m_metaSize - 1; }
 	u32 element_size() const { return m_meta[m_metaSize - 1]; }
 
 private:
