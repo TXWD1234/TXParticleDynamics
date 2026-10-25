@@ -243,7 +243,7 @@ private:
 		}
 	};
 
-	struct TaskGSConstructSecondarySortBucketIndex {
+	struct TaskGSConstructSecondarySortBucketElementCount {
 		struct Argument {
 			u32 RadixDigit;
 			u32 RadixBucketCount;
@@ -261,16 +261,15 @@ private:
 			Argument& arg = std::get<Argument>(varg);
 			std::fill(arg.dest, arg.dest + arg.RadixBucketCount, 0);
 			// counting
-			for (u32 stride = 0; stride < arg.indexStrideCount; stride++) {
+			// bucket is also the lower bits of the original grid index
+			for (u32 bucket = arg.indexStrideOffset;
+			     bucket < arg.indexStrideSize + arg.indexStrideOffset;
+			     bucket++) {
 				// for each stride
+				for (u32 stride = 0; stride < arg.indexStrideCount; stride++) {
 
-				// i is the logical index in one bucket. also the lower bits of
-				// the original grid index
-				for (u32 i = arg.indexStrideOffset;
-				     i < arg.indexStrideSize + arg.indexStrideOffset;
-				     i++) {
 					// for every bucket in index
-					u32 primaryIndex = i + stride * arg.RadixBucketCount;
+					u32 primaryIndex = bucket + stride * arg.RadixBucketCount;
 
 					for (u32 j = arg.index[primaryIndex];
 					     j < arg.index[primaryIndex + 1]; j++) {
@@ -279,17 +278,52 @@ private:
 						arg.dest[arg.src[j]]++; // counting secondary bucket size
 						// counting gridPos occurance
 						// constructing grid system indexArray
-						arg.indexDest[(arg.src[j] << arg.RadixDigit) | i]++;
+						arg.indexDest[(arg.src[j] << arg.RadixDigit) | bucket]++;
 					}
 				}
 			}
+		}
+	};
 
-			// construct psa
-			u32 acc = arg.begin;
-			for (u32 i = 0; i < arg.RadixBucketCount; i++) {
-				u32 old = acc;
-				acc += arg.dest[i];
-				arg.dest[i] = old;
+	struct TaskGSConstructSecondarySortBucketIndexSum {
+		struct Argument {
+			u32 ThreadCount;
+			u32 RadixBucketCount;
+			u32* src; // first entry in first stride in BucketIndex
+			u32 srcStrideSize;
+			u32* res; // bucket index sum (with + 1 pffset)
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			for (u32 bucket = 0; bucket < arg.srcStrideSize; bucket++) {
+				u32 acc = 0;
+				for (u32 i = 0; i < arg.ThreadCount; i++) {
+					acc += *(arg.src + bucket + i * arg.RadixBucketCount);
+				}
+				*(arg.res + bucket) = acc;
+			}
+		}
+	};
+
+	struct TaskGSConstructSecondarySortBucketIndexPSA {
+		struct Argument {
+			u32 ThreadCount;
+			u32 RadixBucketCount;
+			u32* src; // first entry in first stride in BucketIndex
+			u32 srcStrideSize;
+			u32* sum; // bucket index sum (without offset)
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			for (u32 bucket = 0; bucket < arg.srcStrideSize; bucket++) {
+				u32 acc = arg.sum[bucket];
+				for (u32 i = 0; i < arg.ThreadCount; i++) {
+					u32 old = acc;
+					acc += *(arg.src + bucket + i * arg.RadixBucketCount);
+					*(arg.src + bucket + i * arg.RadixBucketCount) = old;
+				}
 			}
 		}
 	};
@@ -376,7 +410,9 @@ private:
 	    TaskGSConstructSourceCompose,
 	    TaskGSConstructPrimarySortBucketIndex,
 	    TaskGSConstructPrimarySortSort,
-	    TaskGSConstructSecondarySortBucketIndex,
+	    TaskGSConstructSecondarySortBucketElementCount,
+	    TaskGSConstructSecondarySortBucketIndexSum,
+	    TaskGSConstructSecondarySortBucketIndexPSA,
 	    TaskGSConstructSecondarySortSort,
 	    TaskGSConstructSecondarySortIndexArraySum,
 	    TaskGSConstructSecondarySortIndexArrayPSA>;
@@ -522,6 +558,7 @@ private:
 			// [RadixBucketCount][ThreadCount]
 			SBuffer<u32> primarySortBucketIndex; // store global index in bucket
 			SBuffer<u32> secondarySortBucketIndex;
+			SBuffer<u32> secondarySortBucketIndexSum;
 			SBuffer<u32> secondarySortDistribution; // per thread in bucket index
 			SBuffer<u32> secondarySortPSABase; // per thread part size in element
 			SBuffer<u32> secondarySortIndexArraySum;
@@ -539,7 +576,7 @@ private:
 			m_state.RadixDigit = std::bit_width(sq(gn) - 1) / 2;
 		}
 		void constructBuffers_impl(u32 n, u32 gn, u32 t) {
-			indexArray.resize(sq(gn));
+			indexArray.resize(sq(gn) + 1);
 			m_data.sourcePSABase = Data_impl::SBuffer<u32>(t + 1);
 			m_data.sourcePSABase.data[0] = 0;
 			m_data.sourceGridPosRaw = Data_impl::DBuffer<u32>(n);
@@ -551,8 +588,9 @@ private:
 			    m_state.RadixBucketCount * t + 2);
 			m_data.primarySortBucketIndex.data[0] = 0;
 			m_data.secondarySortBucketIndex = Data_impl::SBuffer<u32>(
-			    m_state.RadixBucketCount * t + 2);
-			m_data.secondarySortBucketIndex.data[0] = 0;
+			    m_state.RadixBucketCount * t);
+			m_data.secondarySortBucketIndexSum = Data_impl::SBuffer<u32>(
+			    m_state.RadixBucketCount + 1);
 			m_data.secondarySortDistribution = Data_impl::SBuffer<u32>(t);
 			m_data.secondarySortPSABase = Data_impl::SBuffer<u32>(t);
 			m_data.secondarySortIndexArraySum = Data_impl::SBuffer<u32>(t);
@@ -691,8 +729,10 @@ private:
 
 		void constructSecondarySort_impl() {
 			constructSecondarySortMeta_impl();
+			constructSecondarySortBucketElementCount_impl();
 			constructSecondarySortBucketIndex_impl();
 			constructSecondarySortSort_impl();
+			constructSecondarySortIndexArray_impl();
 		}
 		void constructSecondarySortMeta_impl() {
 			tx::distributePartitionsAligned(
@@ -707,7 +747,7 @@ private:
 					        m_data.primarySortBucketIndex.data[begin + i * m_state.RadixBucketCount];
 				    }
 			    });
-			// construct psa
+			// construct psa <------------------ obsolete
 			u32 acc = 0;
 			for (u32 i = 0; i < m_data.secondarySortPSABase.size; i++) {
 				u32 old = acc;
@@ -716,36 +756,79 @@ private:
 			}
 		}
 		/**
+		 * Counts the element of each thread partition.
+		 * After this process, m_data.secondarySortBucketIndex contains the
+		 * element count of each thread in each bucket. Note that the buckets
+		 * now are secondary bucket, aka high bits.
+		 * 
 		 * Also constructs grid system indexArray.
 		 * False sharing when writing into indexArray is avoided by deliberate
-		 * design:
-		 * Each thread handles a certain count of complete buckets from primary
+		 * design: Each thread handles a certain count of complete buckets from primary
 		 * sort, which are also the lower bits of the grid index. Which means,
 		 * every thread writes to contiguous strides in indexArray. And by
 		 * partitioning the buckets such that every thread process bucket count
 		 * that are multiples of a cache line size, false sharing is completely
 		 * avoided.
 		 */
-		void constructSecondarySortBucketIndex_impl() {
+		void constructSecondarySortBucketElementCount_impl() {
 			std::fill(indexArray.begin(), indexArray.end(), 0);
 			threadRunFencedProcess_impl(
 			    m_state.threadStatusCounter, m_source.threads.size(),
 			    [this] {
-				    u32 acc = 0;
+				    u32 begin = 0;
 				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
-					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndex>(
+					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketElementCount>(
 					        m_source.distor, m_state.threadStatusCounter,
-					        TaskGSConstructSecondarySortBucketIndex::Argument{
+					        TaskGSConstructSecondarySortBucketElementCount::Argument{
 					            m_state.RadixDigit, m_state.RadixBucketCount,
 					            m_data.secondarySortPSABase.data[i],
-					            m_data.primarySortBucketIndex.data, acc,
+					            m_data.primarySortBucketIndex.data, begin,
 					            m_data.secondarySortDistribution.data[i],
-					            static_cast<u32>(m_data.secondarySortDistribution.size),
+					            m_data.secondarySortDistribution.size,
 					            m_data.primarySortBucket.data,
 					            m_data.secondarySortBucketIndex.data +
 					                i * m_state.RadixBucketCount,
 					            indexArray.data() });
-					    acc += m_data.secondarySortDistribution.data[i];
+					    begin += m_data.secondarySortDistribution.data[i];
+				    }
+			    });
+		}
+		/**
+		 * Using the element count data from
+		 * constructSecondarySortBucketElementCount_impl, this process compose
+		 * the actual bucket index array by building a stride psa
+		 */
+		void constructSecondarySortBucketIndex_impl() {
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(),
+			    [this] {
+				    u32 begin = 0;
+				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
+					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndexSum>(
+					        m_source.distor, m_state.threadStatusCounter,
+					        TaskGSConstructSecondarySortBucketIndexSum::Argument{
+					            static_cast<u32>(m_source.threads.size()),
+					            m_state.RadixBucketCount,
+					            m_data.secondarySortBucketIndex.data + begin,
+					            m_data.secondarySortDistribution.data[i],
+					            m_data.secondarySortBucketIndexSum.data + begin });
+					    begin += m_data.secondarySortDistribution.data[i];
+				    }
+			    });
+			threadRunFencedProcess_impl(
+			    m_state.threadStatusCounter, m_source.threads.size(),
+			    [this] {
+				    u32 begin = 0;
+				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
+					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndexPSA>(
+					        m_source.distor, m_state.threadStatusCounter,
+					        TaskGSConstructSecondarySortBucketIndexPSA::Argument{
+					            static_cast<u32>(m_source.threads.size()),
+					            m_state.RadixBucketCount,
+					            m_data.secondarySortBucketIndex.data + begin,
+					            m_data.secondarySortDistribution.data[i],
+					            m_data.secondarySortBucketIndexSum.data + begin });
+					    begin += m_data.secondarySortDistribution.data[i];
 				    }
 			    });
 		}
@@ -753,13 +836,13 @@ private:
 			threadRunFencedProcess_impl(
 			    m_state.threadStatusCounter, m_source.threads.size(),
 			    [this] {
-				    u32 acc = 0;
+				    u32 begin = 0;
 				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortSort>(
 					        m_source.distor, m_state.threadStatusCounter,
 					        TaskGSConstructSecondarySortSort::Argument{
 					            m_state.RadixBucketCount,
-					            m_data.primarySortBucketIndex.data + acc,
+					            m_data.primarySortBucketIndex.data + begin,
 					            m_data.secondarySortDistribution.data[i],
 					            static_cast<u32>(m_data.secondarySortDistribution.size),
 					            m_data.primarySortBucket.data,
@@ -767,7 +850,7 @@ private:
 					            m_data.secondarySortBucketIndex.data +
 					                i * m_state.RadixBucketCount,
 					            m_source.sorter });
-					    acc += m_data.secondarySortDistribution.data[i];
+					    begin += m_data.secondarySortDistribution.data[i];
 				    }
 			    });
 		}
@@ -799,6 +882,7 @@ private:
 				            indexArray.data() + begin, end - begin,
 				            *(m_data.secondarySortIndexArraySum.data + tIndex) });
 			    });
+			indexArray.back() = m_source.pos.size();
 		}
 
 
@@ -809,7 +893,7 @@ private:
 
 	void checkGSValid_impl() {
 		tx::PackedPartedView view = m_gs.view(m_data.pos.data());
-		for (u32 i = 0; i < view.size(); i++) {
+		for (u32 i = 0; i < view.partition_size(); i++) {
 			std::span<vec2> s = view[i];
 			for (vec2 v : s) {
 				if (i != tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(

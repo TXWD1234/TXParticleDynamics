@@ -435,7 +435,8 @@ public:
 		                    data + *(meta + partIndex + 1));
 	}
 
-	u32 size() const { return m_metaSize; }
+	u32 partition_size() const { return m_metaSize; }
+	u32 element_size() const { return m_meta[m_metaSize - 1]; }
 
 private:
 	T* m_data = nullptr;
@@ -549,6 +550,8 @@ private:
 	i32 m_index = 0;
 	u32 m_bufferSize = 0, m_bufferCount = 0;
 };
+
+
 
 template <std::invocable<std::string_view> Func =
               decltype([](std::string_view str) { std::cout << str << '\n'; })>
