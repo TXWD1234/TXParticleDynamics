@@ -106,6 +106,8 @@ private:
 
 	struct State_impl {
 		u32 objectCount = 0;
+		std::unique_ptr<std::atomic<u32>> threadStatusCounter =
+		    std::make_unique<std::atomic<u32>>(0);
 	} m_state;
 
 	EngineConfig m_config;
@@ -171,6 +173,7 @@ private:
 		struct Argument {
 			u32* destGridPos;
 			u32* destObjectID;
+			u32* destInv;
 			u32* src; // grid pos raw
 			u32 srcSize;
 			u32 idBase;
@@ -179,6 +182,7 @@ private:
 		void operator()(std::variant<Args...>& varg) {
 			Argument& arg = std::get<Argument>(varg);
 			u32 dest = 0;
+			u32 invDest = 0;
 			for (u32 i = 0; i < arg.srcSize; i++) {
 				// arg.destGridPos[dest] = arg.src[i];
 				// arg.destObjectID[dest] = i + arg.idBase;
@@ -187,6 +191,9 @@ private:
 					arg.destGridPos[dest] = arg.src[i];
 					arg.destObjectID[dest] = i + arg.idBase;
 					dest++;
+				} else {
+					arg.destInv[invDest] = i + arg.idBase;
+					invDest++;
 				}
 			}
 		}
@@ -391,6 +398,24 @@ private:
 		}
 	};
 
+	struct TaskGSBridgeCopyInvObject {
+		struct Argument {
+			u32* src;
+			u32 srcSize;
+			u32 psaBase;
+		};
+		template <class... Args>
+		void operator()(std::variant<Args...>& varg) {
+			Argument& arg = std::get<Argument>(varg);
+			u32 acc = arg.psaBase;
+			for (u32 i = 0; i < arg.srcSize; i++) {
+				u32 old = acc;
+				acc += arg.src[i];
+				arg.src[i] = old;
+			}
+		}
+	};
+
 	struct TaskFence {
 		struct Argument {
 			std::atomic<u32>* counter;
@@ -436,14 +461,14 @@ private:
 	// assign with fences
 	template <class... Func>
 	static void threadAssignFenced_impl(Distributor& distor,
-	                                    std::unique_ptr<std::atomic<u32>>& counter,
+	                                    std::atomic<u32>* counter,
 	                                    auto... args) {
 		distor.assign<Func..., TaskFence>(
-		    args..., TaskFence::Argument{ counter.get() });
+		    args..., TaskFence::Argument{ counter });
 	}
 
 	template <class Func>
-	static void threadRunFencedProcess_impl(std::unique_ptr<std::atomic<u32>>& counter,
+	static void threadRunFencedProcess_impl(std::atomic<u32>* counter,
 	                                        u32 threadCount, Func&& f) {
 		counter->store(threadCount, std::memory_order_release);
 		f();
@@ -452,6 +477,27 @@ private:
 			counter->wait(count, std::memory_order_acquire);
 			count = counter->load(std::memory_order_acquire);
 		}
+	}
+
+	// DevNote: Switch to std::latch for the entire fence system
+	// Func: threaded directly to tx::distributePartitions
+	template <class Func>
+	static void threadDispatchProcess_impl(
+	    u32 size, std::atomic<u32>* counter, u32 threadCount, Func&& f) {
+		threadRunFencedProcess_impl(
+		    counter, threadCount, [&f, size, threadCount] {
+			    tx::distributePartitions(
+			        size, threadCount, std::forward<Func>(f));
+		    });
+	}
+	template <class Func>
+	static void threadDispatchProcessAligned_impl(
+	    u32 size, std::atomic<u32>* counter, u32 threadCount, u32 alignment, Func&& f) {
+		threadRunFencedProcess_impl(
+		    counter, threadCount, [&f, size, threadCount, alignment] {
+			    tx::distributePartitionsAligned(
+			        size, threadCount, alignment, std::forward<Func>(f));
+		    });
 	}
 
 private:
@@ -490,10 +536,12 @@ private:
 		GridSystem_impl() = default;
 		GridSystem_impl(u32 MaxEntityCount, u32 SideCellCount,
 		                std::span<Thread> threads,
-		                GridSystemBufferSorter_impl sorter)
-		    : m_source({ {}, threads, Distributor(threads), sorter }) {
+		                GridSystemBufferSorter_impl sorter,
+		                std::atomic<u32>* counter)
+		    : m_source({ {}, threads, Distributor(threads), sorter, counter }) {
 			initState_impl(MaxEntityCount, SideCellCount);
 			initBuffers_impl(MaxEntityCount, SideCellCount, threads.size());
+			initConstBuffers_impl();
 		}
 
 	public:
@@ -504,6 +552,8 @@ private:
 			return tx::PackedPartedView<T>(
 			    ptr, indexArray.data(), indexArray.size());
 		}
+		std::span<u32> invalidObjects() { return std::span<u32>(
+			m_data.sourceInvalidID.data, m_data.sourceInvalidID.count); }
 
 	public:
 		// ================ Public Interface ================
@@ -518,6 +568,7 @@ private:
 
 		std::vector<u32> indexArray;
 
+
 	private:
 		// ================ Construction Data ================
 
@@ -526,14 +577,13 @@ private:
 			std::span<Thread> threads;
 			Distributor distor;
 			GridSystemBufferSorter_impl sorter;
+			std::atomic<u32>* threadStatusCounter = nullptr;
 		} m_source;
 
 		struct State_impl {
 			u32 SideCellCount = 0;
 			u32 RadixDigit = 0;
 			u32 RadixBucketCount = 0;
-			std::unique_ptr<std::atomic<u32>> threadStatusCounter =
-			    std::make_unique<std::atomic<u32>>(0);
 		} m_state;
 
 		struct Data_impl {
@@ -551,7 +601,10 @@ private:
 
 			// when reading names in here, add an imaginary "Array" suffix
 
+			DBuffer<u32> sourceInvalidID;
+
 			SBuffer<u32> sourcePSABase;
+			SBuffer<u32> sourceInvalidPSABase;
 			DBuffer<u32> sourceGridPosRaw;
 			DBuffer<u32> sourceGridPos;
 			DBuffer<u32> sourceObjectID;
@@ -578,8 +631,11 @@ private:
 		}
 		void initBuffers_impl(u32 n, u32 gn, u32 t) {
 			indexArray.resize(sq(gn) + 1);
+			m_data.sourceInvalidID = Data_impl::DBuffer<u32>(n);
 			m_data.sourcePSABase = Data_impl::SBuffer<u32>(t + 1);
 			m_data.sourcePSABase.data[0] = 0;
+			m_data.sourceInvalidPSABase = Data_impl::SBuffer<u32>(t + 1);
+			m_data.sourceInvalidPSABase.data[0] = 0;
 			m_data.sourceGridPosRaw = Data_impl::DBuffer<u32>(n);
 			m_data.sourceGridPos = Data_impl::DBuffer<u32>(n);
 			m_data.sourceObjectID = Data_impl::DBuffer<u32>(n);
@@ -605,28 +661,17 @@ private:
 		}
 
 	private:
-		// ================ Helpers ================
-
-		// DevNote: Switch to std::latch for the entire fence system
-		// Func: threaded directly to tx::distributePartitions
 		template <class Func>
-		void dispatchProcess(u32 size, Func&& f) {
-			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(), [this, &f, size] {
-				    tx::distributePartitions(
-				        size, m_source.threads.size(),
-				        std::forward<Func>(f));
-			    });
+		void dispatchProcess_impl(u32 size, Func&& f) {
+			threadDispatchProcess_impl(
+			    size, m_source.threadStatusCounter,
+			    m_source.threads.size(), std::forward<Func>(f));
 		}
 		template <class Func>
-		void dispatchProcessAligned(u32 size, u32 alignment, Func&& f) {
-			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(),
-			    [this, &f, size, alignment] {
-				    tx::distributePartitionsAligned(
-				        size, m_source.threads.size(),
-				        alignment, std::forward<Func>(f));
-			    });
+		void dispatchProcessAligned_impl(u32 size, u32 align, Func&& f) {
+			threadDispatchProcessAligned_impl(
+			    size, m_source.threadStatusCounter,
+			    m_source.threads.size(), align, std::forward<Func>(f));
 		}
 
 	private:
@@ -646,10 +691,10 @@ private:
 		}
 		void constructSourceGridPosRaw_impl() {
 			m_data.sourceGridPosRaw.count = m_source.pos.size();
-			dispatchProcess(
+			dispatchProcess_impl(
 			    m_source.pos.size(), [this](u32 begin, u32 end) {
 				    threadAssignFenced_impl<TaskGSConstructSourceGridPos>(
-				        m_source.distor, m_state.threadStatusCounter,
+				        m_source.distor, m_source.threadStatusCounter,
 				        TaskGSConstructSourceGridPos::Argument{
 				            m_source.pos.data() + begin,
 				            m_data.sourceGridPosRaw.data + begin, end - begin,
@@ -657,31 +702,38 @@ private:
 			    });
 		}
 		void constructSourceMeta_impl() {
+			// DevNote: potential optimization: multi-thread
 			tx::distributePartitions(
 			    m_data.sourceGridPosRaw.count, m_source.threads.size(),
 			    [this](u32 begin, u32 end, u32 tIndex) {
 				    // count valid grid pos in range and construct psa
 				    tIndex++;
-				    m_data.sourcePSABase.data[tIndex] =
-				        m_data.sourcePSABase.data[tIndex - 1];
+				    u32 acc = 0;
 				    for (u32 i = begin; i < end; i++) {
-					    m_data.sourcePSABase.data[tIndex] +=
-					        m_data.sourceGridPosRaw.data[i] != u32{ 0xFFFFFFFF };
+					    acc += m_data.sourceGridPosRaw.data[i] != u32{ 0xFFFFFFFF };
 				    }
+				    m_data.sourcePSABase.data[tIndex] =
+				        m_data.sourcePSABase.data[tIndex - 1] + acc;
+				    m_data.sourceInvalidPSABase.data[tIndex] =
+				        m_data.sourceInvalidPSABase.data[tIndex - 1] + end - begin - acc;
 			    });
 			m_data.sourceGridPos.count =
 			    m_data.sourcePSABase.data[m_data.sourcePSABase.size - 1];
 			m_data.sourceObjectID.count = m_data.sourceGridPos.count;
+			m_data.sourceInvalidID.count =
+			    m_data.sourceInvalidPSABase.data[m_data.sourceInvalidPSABase.size - 1];
 		}
 		void constructSourceCompose_impl() {
-			dispatchProcess(
+			dispatchProcess_impl(
 			    m_data.sourceGridPosRaw.count, [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<TaskGSConstructSourceCompose>(
-				        m_source.distor, m_state.threadStatusCounter,
+				        m_source.distor, m_source.threadStatusCounter,
 				        TaskGSConstructSourceCompose::Argument{
 				            m_data.sourceGridPos.data + m_data.sourcePSABase.data[tIndex],
 				            m_data.sourceObjectID.data + m_data.sourcePSABase.data[tIndex],
-				            m_data.sourceGridPosRaw.data + begin, end - begin, begin });
+				            m_data.sourceInvalidID.data + m_data.sourceInvalidPSABase.data[tIndex],
+				            m_data.sourceGridPosRaw.data + begin,
+				            end - begin, begin });
 			    });
 		}
 
@@ -691,10 +743,10 @@ private:
 		}
 		// counting
 		void constructPrimarySortBucketIndex_impl() {
-			dispatchProcess(
+			dispatchProcess_impl(
 			    m_data.sourceGridPos.count, [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<TaskGSConstructPrimarySortBucketIndex>(
-				        m_source.distor, m_state.threadStatusCounter,
+				        m_source.distor, m_source.threadStatusCounter,
 				        TaskGSConstructPrimarySortBucketIndex::Argument{
 				            m_state.RadixDigit, m_state.RadixBucketCount,
 				            begin, m_data.sourceGridPos.data + begin, end - begin,
@@ -704,10 +756,10 @@ private:
 		}
 		// sorting
 		void constructParimarySortSort_impl() {
-			dispatchProcess(
+			dispatchProcess_impl(
 			    m_data.sourceGridPos.count, [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<TaskGSConstructPrimarySortSort>(
-				        m_source.distor, m_state.threadStatusCounter,
+				        m_source.distor, m_source.threadStatusCounter,
 				        TaskGSConstructPrimarySortSort::Argument{
 				            m_state.RadixDigit,
 				            m_data.primarySortBucketIndex.data + 1 +
@@ -759,12 +811,12 @@ private:
 		void constructSecondarySortBucketElementCount_impl() {
 			std::fill(indexArray.begin(), indexArray.end(), 0);
 			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(),
+			    m_source.threadStatusCounter, m_source.threads.size(),
 			    [this] {
 				    u32 begin = 0;
 				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketElementCount>(
-					        m_source.distor, m_state.threadStatusCounter,
+					        m_source.distor, m_source.threadStatusCounter,
 					        TaskGSConstructSecondarySortBucketElementCount::Argument{
 					            m_state.RadixDigit, m_state.RadixBucketCount,
 					            m_data.primarySortBucketIndex.data, begin,
@@ -785,12 +837,12 @@ private:
 		 */
 		void constructSecondarySortBucketIndex_impl() {
 			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(),
+			    m_source.threadStatusCounter, m_source.threads.size(),
 			    [this] {
 				    u32 begin = 0;
 				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndexSum>(
-					        m_source.distor, m_state.threadStatusCounter,
+					        m_source.distor, m_source.threadStatusCounter,
 					        TaskGSConstructSecondarySortBucketIndexSum::Argument{
 					            static_cast<u32>(m_source.threads.size()),
 					            m_state.RadixBucketCount,
@@ -801,12 +853,12 @@ private:
 				    }
 			    });
 			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(),
+			    m_source.threadStatusCounter, m_source.threads.size(),
 			    [this] {
 				    u32 begin = 0;
 				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortBucketIndexPSA>(
-					        m_source.distor, m_state.threadStatusCounter,
+					        m_source.distor, m_source.threadStatusCounter,
 					        TaskGSConstructSecondarySortBucketIndexPSA::Argument{
 					            static_cast<u32>(m_source.threads.size()),
 					            m_state.RadixBucketCount,
@@ -819,12 +871,12 @@ private:
 		}
 		void constructSecondarySortSort_impl() {
 			threadRunFencedProcess_impl(
-			    m_state.threadStatusCounter, m_source.threads.size(),
+			    m_source.threadStatusCounter, m_source.threads.size(),
 			    [this] {
 				    u32 begin = 0;
 				    for (u32 i = 0; i < m_data.secondarySortDistribution.size; i++) {
 					    threadAssignFenced_impl<TaskGSConstructSecondarySortSort>(
-					        m_source.distor, m_state.threadStatusCounter,
+					        m_source.distor, m_source.threadStatusCounter,
 					        TaskGSConstructSecondarySortSort::Argument{
 					            m_state.RadixBucketCount,
 					            m_data.primarySortBucketIndex.data + begin,
@@ -841,12 +893,12 @@ private:
 		}
 		// construct psa of index array
 		void constructSecondarySortIndexArray_impl() {
-			dispatchProcessAligned(
+			dispatchProcessAligned_impl(
 			    indexArray.size(), tx::CacheLineCapacity<u32>,
 			    [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<
 				        TaskGSConstructSecondarySortIndexArraySum>(
-				        m_source.distor, m_state.threadStatusCounter,
+				        m_source.distor, m_source.threadStatusCounter,
 				        TaskGSConstructSecondarySortIndexArraySum::Argument{
 				            indexArray.data() + begin, end - begin,
 				            m_data.secondarySortIndexArraySum.data + tIndex });
@@ -857,21 +909,30 @@ private:
 				acc += m_data.secondarySortIndexArraySum.data[i];
 				m_data.secondarySortIndexArraySum.data[i] = old;
 			}
-			dispatchProcessAligned(
+			dispatchProcessAligned_impl(
 			    indexArray.size(), tx::CacheLineCapacity<u32>,
 			    [this](u32 begin, u32 end, u32 tIndex) {
 				    threadAssignFenced_impl<
 				        TaskGSConstructSecondarySortIndexArrayPSA>(
-				        m_source.distor, m_state.threadStatusCounter,
+				        m_source.distor, m_source.threadStatusCounter,
 				        TaskGSConstructSecondarySortIndexArrayPSA::Argument{
 				            indexArray.data() + begin, end - begin,
 				            *(m_data.secondarySortIndexArraySum.data + tIndex) });
 			    });
-			indexArray.back() = m_source.pos.size();
+			indexArray.back() = m_data.sourceGridPos.count;
 		}
 
 
 	} m_gs;
+
+private:
+	// ################ Grid System Bridging ################
+
+	void updateGS_impl() {
+		m_gs.update(m_data.pos);
+		// copy invalid objects to final array
+		std::span<u32> invids = m_gs.invalidObjects();
+	}
 
 private:
 	// ################ Grid System Debugging ################
