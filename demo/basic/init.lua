@@ -1,6 +1,8 @@
-ObjectCount = 2500
+ObjectCount = 64000
 ObjectCounter = 0
 
-for i = 1, 2500 do
-	pd.createObject(rand(-0.9, 0.9), rand(-0.9, 0.9))
+local bound = 1
+
+for i = 1, ObjectCount do
+	pd.createObject(rand(-bound, bound), rand(-bound, bound))
 end

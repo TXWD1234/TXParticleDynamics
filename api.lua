@@ -6,10 +6,11 @@
 ---@class EngineParameter
 ---@field MaxEntityCount integer
 ---@field SubstepCount integer
+---@field ObjectRadius number
+---@field ThreadCount number
 
 -- The world configuration of the engine. Can be changed at any time
 ---@class EngineConfig
----@field ObjectRadius number
 ---@field Gravity number
 ---@field Friction number
 ---@field Restitution number
