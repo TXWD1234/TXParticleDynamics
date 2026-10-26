@@ -440,3 +440,32 @@ private:
 	std::optional<Engine> engine;
 };
 ```
+
+## 2026-10-25 15:37:00:<br>Category: Development Report<br>Topic: Debugging GridSystem
+*Ah~ The joy of debugging...*
+*So many bugs, there are so many bugs...*
+After several iterations of AI review, most major bugs were caught before runtime test, but there are still several major bugs remain, including:
+- Primary Sort source index offset mismatch
+- Secondary Sort index increment
+- Secondart Sort traversal order mismatch
+While trying to debug, a new suite of debugging tool was created in debug.hpp.
+*The process was too painful I already forgot what was it exactly and could even write proper report..*
+Eventually, the test was passed, and that marks the validation, of the Grid System implementation.
+
+## 2026-10-25 23:09:45:<br>Category: Development Report<br>Topic: Integrating GridSystem
+*Originally I feel like there are almost nothing to talk about here, but I guess the important thing is that this entry is present here as a milestone...*
+Once GridSystem is logically complete, the next target is to actually use it in the collision solving and thus boost performance.
+The grid wise update logic was mostly inherited from the last physics engine I've made, including the halved access range of each grid instead of the full 8 neighbors to prevent updating twice, and the discriminated traversing against edge cells which don't access a complete range of neighbours.
+What was new was instead of branching, compile time dispatch was used, thereby benefiting performance.
+However, the collision update is not at it's final form. The present version is simply a working bridge, not the extreme algorithm this project is pursuing.
+
+## 2026-10-25 23:16:56:<br>Category: Development Report<br>Topic: Refactoring physics solvers
+*After many fiddling, I've got myself a very broken engine. And at last, blested by the power of some unknown intelligence named claude, the solver was rectified.*
+After the grid system integration first completed, the test was almost disappointing. With substep 1, as few as 1000 objects are enough to create pressure explosions.
+*If you are not familiar with the physics engine lingo, pressure explosion is basically when a ton of objects was pushed in a small area by some force, and the solver is somewhere flawed and introduced energy, which created a feed back loop of accumulating energy, and evetually propagated all that energy to the surrounding objects, creating an accleration so powerful that the entire cluster was affected and flew outwards.*
+I was panicing at the start, thinking that it's because there are somewhere wrong in the grid wise collision update. But after searching and comparing with the older engine instances, I've confirmed that the instability was present in the engine this entire time since the first day the solver was written.
+And after I started the process of attempting to rectify the problem, even more problem showed up. And eventually I lost my sanity and started tweaking numbers and formulas around, concurrently desperately screaming at my LLM.
+At last, after I've realized I had stuck in a deadlocking loop, I decided to break out by swtiching to a new context and appeal assistence from the unknown intelligence named claude.
+After minutes of diagnosting, a confirming proposal was made, and surprisingly, it worked.
+*Idk why I decided to express the whole thing like that.*
+So yeah, it's again the power of AI. But still, I consider this a victory, because what I am really after is not the physics, but the performance optimization.

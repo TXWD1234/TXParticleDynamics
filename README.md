@@ -2,9 +2,9 @@
 **The Particle Physics Engine that reaches the limit of CPU computation.**
 
 # Performance Profile
-**Substep 1:**
-- 7500 object
-- 200 average fps
+**Substep 4:**
+- 64000 objects
+- 160 average fps
 
 ## Why am I not getting the promised performance?
 ### 1. Hardware differece
@@ -40,7 +40,8 @@ done
 ```
 
 # Screenshot
-![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/cluster.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/gs-demo-1.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/gs-demo-2.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/galaxy.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/galaxy-2.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/spiral.png)
