@@ -432,18 +432,55 @@ public:
 	}
 	partition operator[](u32 partIndex) const { return at(partIndex); }
 
+	T& at(u32 partIndex, u32 index) const {
+		return at(partIndex, index, m_data, m_meta);
+	}
+	T& operator[](u32 partIndex, u32 index) const { return at(partIndex, index); }
+
 	static partition at(u32 partIndex, T* data, const u32* meta) {
 		return std::span<T>(data + *(meta + partIndex),
 		                    data + *(meta + partIndex + 1));
 	}
+	static T& at(u32 partIndex, u32 index, T* data, const u32* meta) {
+		return *(data + *(meta + partIndex) + index);
+	}
 
-	u32 partition_size() const { return m_metaSize - 1; }
-	u32 element_size() const { return m_meta[m_metaSize - 1]; }
+	u32 size_partition() const { return m_metaSize - 1; }
+	u32 size_element() const { return m_meta[m_metaSize - 1]; }
 
 private:
 	T* m_data = nullptr;
 	const u32* m_meta = nullptr;
-	const u32 m_metaSize = 0;
+	u32 m_metaSize = 0;
+};
+
+class PackedPartedMetaView {
+public:
+	PackedPartedMetaView() = default;
+	PackedPartedMetaView(const u32* meta, u32 metaSize)
+	    : m_meta(meta), m_metaSize(metaSize) {}
+
+	PackedPartedMetaView(const PackedPartedMetaView& other) = default;
+	PackedPartedMetaView& operator=(const PackedPartedMetaView& other) = default;
+	PackedPartedMetaView(PackedPartedMetaView&& other) = default;
+	PackedPartedMetaView& operator=(PackedPartedMetaView&& other) = default;
+
+public:
+	u32 begin(u32 part) const { return m_meta[part]; }
+	u32 end(u32 part) const { return m_meta[part + 1]; }
+	u32 size(u32 part) const { return end(part) - begin(part); }
+	bool empty(u32 part) const { return begin(part) == end(part); }
+
+	static u32 begin(u32 part, const u32* meta) { return meta[part]; }
+	static u32 end(u32 part, const u32* meta) { return meta[part + 1]; }
+	static u32 size(u32 part, const u32* meta) { return end(part, meta) - begin(part, meta); }
+
+	u32 size_partition() const { return m_metaSize - 1; }
+	u32 size_element() const { return m_meta[m_metaSize - 1]; }
+
+private:
+	const u32* m_meta = nullptr;
+	u32 m_metaSize = 0;
 };
 
 template <class T>
