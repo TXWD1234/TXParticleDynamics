@@ -3,7 +3,6 @@
 #pragma once
 #include "Project.hpp"
 #include "render_engine.hpp"
-#include "tx/type_traits.hpp"
 #include <memory>
 #include <string_view>
 

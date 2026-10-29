@@ -1050,7 +1050,7 @@ private:
 	void updateCollisionGrid_impl(uvec2 gridPos) {
 		u32 index = tx::ZGridToIndex(gridPos);
 		tx::PackedPartedMetaView view = m_gs.metaView();
-		if (view.empty(index)) return; // DevNote: benchmark
+		//if (view.empty(index)) return; // DevNote: benchmark
 		iterateGridCellNeighbor(
 		    gridPos, u8_constant<Mask>{}, [this, index, view](uvec2 other) {
 			    u32 oindex = tx::ZGridToIndex(other);

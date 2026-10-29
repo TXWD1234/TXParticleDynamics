@@ -8,6 +8,9 @@
 #define SOL_ALL_SAFETIES_ON 1
 #include "sol/sol.hpp"
 #include <memory>
+#include <functional>
+#include <string_view>
+#include <iostream>
 
 namespace tx::ParticleDynamics {
 
