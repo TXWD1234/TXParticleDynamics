@@ -1,0 +1,18 @@
+CompileFlags:
+  CompilationDatabase: build
+  Remove:
+    - -fmodules-ts
+    - -fmodule-mapper=*
+    - -fdeps-format=*
+  Add:
+    - -std=c++23
+    - -Wall
+    - -Wextra
+    - -fdelayed-template-parsing
+InlayHints:
+  Enabled: Yes
+  DeducedTypes: No       # Stops crashes on decltype(auto) / auto returns
+  ParameterNames: No     # Stops off-by-one / null-deref on explicit object params
+  Designators: Yes
+  BlockEnd: Yes
+  DefaultArguments: Yes

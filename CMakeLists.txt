@@ -15,11 +15,10 @@ endif()
 # Dependencies
 
 # TXLib
-include("${libs}/TXLib/add_txlib.cmake")
+include("${libs}/add_txlib.cmake")
 tx_add_txlib(
 	VERSION "refactor/lib-structure"
-	LOCAL_DIR /home/TX_Jerry/Programming/dev/libs/TXLib
-	BUILD_DIR ./build
+	LOCAL_DIR "/home/TX_Jerry/Programming/dev/libs/TXLib"
 )
 
 # Lua and sol2
@@ -28,7 +27,6 @@ include("${TXLib_SOURCE_DIR}/cmake/add_lib.cmake")
 tx_add_lib(
 	LIB_NAME sol2
 	LOCAL_DIR /home/TX_Jerry/Programming/dev/libs/sol2
-	BIN_DIR ./build
 	VERSION develop
 	REPOSITORY https://github.com/ThePhD/sol2.git
 )
@@ -41,6 +39,7 @@ add_executable(TXProject
 	"${src}/Application.hpp"
 	"${src}/lua_application.hpp"
 	"${src}/lua_application.cpp"
+	"${src}/utility.hpp"
 	"${src}/infrastructure.hpp"
 	"${src}/render_engine.hpp"
 )

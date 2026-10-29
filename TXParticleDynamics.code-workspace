@@ -1,13 +1,15 @@
 {
 	"folders": [
 		{
+			"name": "Project",
 			"path": "."
 		},
 		{
+			"name": "TXLib",
 			"path": "/home/TX_Jerry/Programming/dev/libs/TXLib"
 		}
 	],
 	"settings": {
-		"cmake.sourceDirectory": "${workspaceFolder:TXParticleDynamics}"
+		"cmake.sourceDirectory": "${workspaceFolder:Project}"
   }
 }

@@ -469,3 +469,56 @@ At last, after I've realized I had stuck in a deadlocking loop, I decided to bre
 After minutes of diagnosting, a confirming proposal was made, and surprisingly, it worked.
 *Idk why I decided to express the whole thing like that.*
 So yeah, it's again the power of AI. But still, I consider this a victory, because what I am really after is not the physics, but the performance optimization.
+
+## 2026-10-29 12:08:05:<br>Category: Development Report<br>Topic: Fix Clangd Header Problem
+As explained before (Clangd Header Parsing Problem and Solution), clangd had some problem when editing header files. It does not read compile_command.json well and therefore not cooperating with CMake, causing all the inter-library inclusion to fail.
+The solution from last time, however, was flawed when developing out side of TXLib directory. Since anything outside of TXLib directory cannot access the .clangd file inside of TXLib directory.
+*There were also some desperate AI fiddling last time, and I was almost ignorant against clangd's logic and didn't bother learning it, but this time the solution was the logical conclusion after I've studied clangd's architecture. All of that are essentially saying: "The old solution was flawed, the new one is flawless."*
+
+## New Problem
+The principle is:
+**For a header file to be correctly parsed, 2 condition must be satisfied: It must be able to find the compilation database (`compile_command.json`) and in that database it was compiled against, that header must be included by some cpp file.**
+
+It has been proven that header files **can** read compile_command.json, but only when it is included by a cpp file (an actual transition unit).
+So now the problem becomes, once the programmer (me) had ensured the header file is included in some cpp, how can clangd figure out where the compilation database is?
+The method to set the compilation database path is:
+```yaml
+CompileFlags:
+  CompilationDatabase: /path/to/database
+```
+In the old scenario of TXLib development, this is obviously very easy, it's just a relative path within the directory.
+But now the problem is, when there's a project external to TXLib, who is referencing TXLib locally (`tx_add_txlib(LOCAL_DIR ...)`), that project might also modify TXLib source code. But once the source code is modified, the old compilation database of TXLib in TXLib's directory is stalled. And since there's no way for the .clangd in TXLib to know where that external project is, it is impossible for TXLib to use the new database compiled by the external project.
+
+## First Solution
+Since clangd lookup .clangd only towards outside of the directory, if TXLib is somehow inside the directory of the project, then it should find the .clangd at the root of the project, which knows where the compilation database of that project is, and thereby achieving the objective.
+But copying the entire TXLib to a project means editing it don't sync to others, even with github managing it, the push and pull is going to be crazy, and that's no good.
+Fortunately, there's this symlink thing exists, that acts as a reference to something on the disk, and can be accessed directly as if it is just a copy of it, but auto sync at the same time.
+And that's exactly what we need. By symlinking the entire TXLib directory into the project and referening that, all files path are now literally inside project folder, and then clangd lookup will find the .clangd from the project root, which defines the compilation database as the newest project compilation database.
+
+## Final Solution
+However, the apparent perfect solution appeared to be flawed. The reason is that clangd resolves symlink path to real path internally undoubtedly, and no configuration can change it. That means even in VSCode file explorer I can open a file in TXLib and have clangd parse it with no problem, when VSCode tries to ask for a path from clangd, for example the F12 Go to Reference feature, the file opened has the real path in TXLib returned by clangd, which fails to parse.
+
+To solve that, I finally gave up trying to fight against clangd and instead obey it's rules.
+Since clangd start .clangd lookup from the opened source file, to be *clangd compliant (I am speaking very sarcastically right now. If you cannot tell, I HATE this.)*, the .clangd file must be in TXLib directory.
+And building around that invariant, another invariant can be deduced: The `compile_command.json` must be globally static, which means it must be always at a fixed path in the file system.
+And that drived the final design: Everytime a project referencing TXLib builds, it copys the `compile_command.json` the compilation produces to TXLib's compilation database path, and overwrite anything that was there before, which is persumably previous compilation database.
+Copy here is chosen instead of symlink is because when a build in TXLib edited the `compile_command.json` in TXLib, in the case of symklink, it's going to sync to whatever project last linked their `compile_command.json` to there, which is going to mess up that project's clangd because TXLib doesn't have the entities specific to that project, While copy is strictly unidirectional from external project to TXLib.
+
+After the design is confirmed, implementing it is still painful. I want to restrict the integration of this out of CMake, since it's only for me, and I don't want my CMake Build System contaminated.
+At first I tried to do it with `tasks.json`, but realized how hard it is to express logic in json, and quickly scrapted that idea.
+And then I am suddenly strucked by inspiration: Why can't I made a vscode extension to do that?
+So that's what I ended up deciding to do.
+And I also decided to take this seriously, and actually organize code, care about readability and expandability, and more importantly, take this into consideration of one of my work, instead of some random utility pieced together temporarily in desperation of getting something to work.
+That means, [github repoooooooo](https://github.com/TXWD1234/txlib-dev-utils) *(idk why I'm so informal... this should be serious...)*.
+Speaking of which, me personally actually never utilized the language TypeScript in any of my previous projects; I was therefore simultaneously learning a new language while programming the extension utility. *(Since last sentence was so informal, I've intentionally made the following sentence exceptionally sophisticated)*
+*Although I could do it with `task.json`, I've decided to write an extension anyways. Although I could let AI write the whole thing, I've decided to write it myself anyways. YEAH, I'm just like that.*
+But the lesson I learned from this is that, writing "robust" and error handled application is very, very tedious and painful. And since there are no exceptionally complicated logic, AI is perfectly suitable for this job.
+*Maybe next time I'll just don't care and make AI write it for me?*
+
+
+
+TXParticleDynamics TODO:
+- Graphics - camera, window resize, renderer refactor
+- Lua Test Suite - precision, object control
+  - Investigate energy accumulation casued by substep decrement
+- Per-Object Gravity 
