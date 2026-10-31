@@ -6,6 +6,7 @@
 #include "impl/data_utils.hpp"
 #include "impl/geometry.hpp"
 #include "impl/numeric_utils.hpp"
+#include "impl/parted_view.hpp"
 #include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
 #include <atomic>
@@ -164,7 +165,7 @@ template <class Argument, class... TArgs>
 	                                                  std::type_identity<Arg>) {
 		                                     return std::invocable<Arg, Argument&>;
 	                                     }),
-	                                     Args...>;
+				                         Args...>;
             }))
 class TaskThread {
 	/**
@@ -263,7 +264,7 @@ private:
 // Func(begin, end) / Func(begin, end, threadIndex)
 template <class Func>
     requires std::invocable<Func, u32, u32> ||
-             std::invocable<Func, u32, u32, u32>
+	         std::invocable<Func, u32, u32, u32>
 void distributePartitions(u32 size, u32 partCount, Func&& f) {
 	auto invoke = [&](u32 a, u32 b, u32 c) {
 		if constexpr (std::invocable<Func, u32, u32>)
@@ -286,7 +287,7 @@ void distributePartitions(u32 size, u32 partCount, Func&& f) {
 }
 template <class Func>
     requires std::invocable<Func, u32, u32> ||
-             std::invocable<Func, u32, u32, u32>
+	         std::invocable<Func, u32, u32, u32>
 void distributePartitionsAligned(u32 size, u32 partCount, u32 alignment, Func&& f) {
 	u32 alignedPartCount = size / alignment;
 	u32 remainder = size - alignedPartCount * alignment;
@@ -300,8 +301,8 @@ void distributePartitionsAligned(u32 size, u32 partCount, u32 alignment, Func&& 
 				    f(a, b, c);
 		    };
 		    invoke(begin * alignment,
-		           end * alignment + remainder * (i + 1 == partCount),
-		           i);
+			       end * alignment + remainder * (i + 1 == partCount),
+			       i);
 	    });
 }
 
@@ -395,7 +396,7 @@ inline u32 ZGridToIndex(uvec2 pos) {
 inline uvec2 ZGridToPos(u32 index) {
 	if constexpr (PDEP_Available)
 		return { intrin::pext_u32(index, 0x55555555),
-			     intrin::pext_u32(index, 0xAAAAAAAA) };
+		         intrin::pext_u32(index, 0xAAAAAAAA) };
 	else {
 		auto compact = [](u32 v) -> u16 {
 			v &= 0x55555555;
@@ -483,35 +484,6 @@ private:
 	u32 m_metaSize = 0;
 };
 
-template <class T>
-class UniformPartedView {
-public:
-	UniformPartedView() = default;
-	UniformPartedView(T* data, u32 partSize) : m_data(data), m_partSize(partSize) {}
-
-	UniformPartedView(const UniformPartedView& other) = default;
-	UniformPartedView& operator=(const UniformPartedView& other) = default;
-	UniformPartedView(UniformPartedView&& other) = default;
-	UniformPartedView& operator=(UniformPartedView&& other) = default;
-
-public:
-	using partition = std::span<T>;
-
-	partition at(u32 partIndex) const {
-		return at(partIndex, m_data, m_partSize);
-	}
-	partition operator[](u32 partIndex) const { return at(partIndex); }
-
-	static partition at(u32 partIndex, T* data, u32 partSize) {
-		return std::span<T>(data + partIndex * partSize,
-		                    data + partIndex * partSize + partSize);
-	}
-
-private:
-	T* m_data = nullptr;
-	u32 m_partSize = 0;
-};
-
 template <class Derived>
 class ContainerViewingInterface {
 	constexpr Derived& self() noexcept { return static_cast<Derived&>(*this); }
@@ -545,15 +517,6 @@ public:
 	constexpr auto data() noexcept { return std::to_address(self().begin()); }
 	constexpr auto data() const noexcept { return std::to_address(self().begin()); }
 };
-
-namespace impl {
-template <std::signed_integral T>
-constexpr T findSignedWrappedPhysIndex(T index, T size) {
-	T rem = index % size;
-	T mask = rem >> (sizeof(T) * CHAR_BIT - 1); // rem < 0 ? 0xFFFFFFFF : 0x0
-	return rem + (size & mask);
-}
-} // namespace impl
 
 template <class T, tx::allocator Allocator = std::allocator<T>>
 class AlternatingBuffer

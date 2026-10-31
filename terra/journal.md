@@ -515,6 +515,180 @@ Speaking of which, me personally actually never utilized the language TypeScript
 But the lesson I learned from this is that, writing "robust" and error handled application is very, very tedious and painful. And since there are no exceptionally complicated logic, AI is perfectly suitable for this job.
 *Maybe next time I'll just don't care and make AI write it for me?*
 
+## 2026-10-30 00:54:31:<br>Category: Personal Journal<br>Topic: Recovering Permanently Deleted Files (With PhotoRec)
+*The simplified story was: By some unforgivable mistake, I nuked my entire `~/Programming/dev` directory.*
+
+## Immediate Reaction
+Immediately after the deletion action was performed or realized, cease any possible action that might perform write operation to the disk, as which risk the potential of overwriting the freed disk space from the deletion, hence overwriting the previous data there and thus causing true permanent data loss.
+After which, check if there are any process still opening the file. If so, any of them could be immediately recovered.
+If not, the most important thing following is to reboot into usb, in pursuit of avoiding any possible disk writes.
+
+## In the usb
+The objective in the usb is to image the entire partition where permanent deletion happened, therefore preventing any future writes overwriting the deleted data, and acquiring viability of the machine as soon as possible.
+Here's the procedure of imaging:
+1. Mount a separate partition on the disk, or a different disk. Make sure it not being the original partition, also verify that the avialable capacity is bigger then the original partition.
+2. Commence the process of imaging via: *adjust the paths accordingly*
+```bash
+sudo ddrescue -n /dev/nvme0n1p7 /mnt/disk/arch-root.img /mnt/disk/arch-root.map
+```
+After the process is finished, verify the validity of the image via:
+```bash
+sudo ddrescuelog -t /mnt/disk/arch-root.map
+```
+
+## Recovering the data
+*After several attempts in different tools, I found PhotoRec to be the most effective tool of this job. Other tools I've tried include: ext4magic.*
+PhotoRec works by reading all the data in the image, and recognizing specific patterns to determind files. It does not relies on file system journals or meta data, instead entirely operating on raw data.
+
+Launch PhotoRec via:
+```bash
+sudo photorec /mnt/disk/arch-root.img
+```
+In the tui, select the options as required. When promptedd to select scan area, choose Free for unallocated areas.
+After the process has returned, a set of files should be produced at the selected destination, with some meta data header in each file. The header can be used to determind the original metadata of the file.
+
+A custom made automation tool may be utilized to parse the result of PhotoRec:
+```cpp
+#include <iostream>
+#include <filesystem>
+#include <fstream>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+
+namespace fs = std::filesystem;
+
+//template class tx::impl::OverlayMMW<tx::impl::RingBufferOverlayBase, int>;
+
+namespace tx {
+std::string readWholeFileText(const std::filesystem::path& filePath) {
+	if (!fs::exists(filePath)) throw std::runtime_error("tx::readWholeFileBin(): file path don't exist.");
+	size_t fileSize = std::filesystem::file_size(filePath);
+
+	std::string buffer(fileSize, '\0');
+	std::ifstream ifs(filePath, std::ios::binary);
+	if (!ifs) { throw std::runtime_error("tx::readWholeFileText(): Failed to open file"); }
+	ifs.read(buffer.data(), fileSize);
+	if (static_cast<size_t>(ifs.gcount()) != fileSize) { throw std::runtime_error("tx::readWholeFileText(): Failed to read entire file. Buffer size not matching file size."); }
+	return buffer;
+}
+
+
+using u64 = uint64_t;
+using u32 = uint32_t;
+using u16 = uint16_t;
+using u8 = uint8_t;
+using i64 = int64_t;
+using i32 = int32_t;
+using i16 = int16_t;
+using i8 = int8_t;
+using f32 = float;
+using f64 = double;
+} // namespace tx
+
+struct File {
+	std::string path;
+	tx::u64 timestamp = 0;
+};
+
+std::size_t count_files_recursive(const fs::path& dir_path) {
+	if (!fs::exists(dir_path) || !fs::is_directory(dir_path)) {
+		std::cerr << "Provided path is not a valid directory.\n";
+		return 0;
+	}
+
+	std::size_t file_count = 0;
+
+	// Skip permission errors instead of throwing exceptions
+	auto options = fs::directory_options::skip_permission_denied;
+	std::error_code ec;
+
+	for (fs::recursive_directory_iterator it(dir_path, options, ec), end; it != end; it.increment(ec)) {
+		if (ec) {
+			std::cerr << "Error accessing path: " << ec.message() << '\n';
+			continue;
+		}
+
+		// is_regular_file returns true for standard files (excludes subdirectories, symlinks, sockets, etc.)
+		if (it->is_regular_file(ec)) {
+			++file_count;
+		}
+	}
+
+	return file_count;
+}
+
+
+int main() {
+
+	std::unordered_map<std::string, File> data;
+
+	tx::u32 fileCount = count_files_recursive("/mnt/usb"), fileCounter = 0;
+	for (auto recup : fs::directory_iterator("/mnt/usb")) {
+		std::string idk = recup.path().string().substr(0, 15);
+		if (!(idk == "/mnt/usb/recup_" && recup.is_directory())) continue;
+		for (auto file : fs::directory_iterator(recup)) {
+			std::cout << "\033[2K\r" << fileCounter++ << '/' << fileCount << std::flush;
+
+			std::ifstream ifs(file.path());
+			char header[39];
+			header[38] = '\0';
+			ifs.read(header, 38);
+			if (std::string_view(header) != "file:///home/TX_Jerry/Programming/dev/") continue;
+
+			std::string vpath;
+			tx::u64 timestamp;
+
+			char meta[256];
+			ifs.read(meta, 256);
+			int cursor = 0;
+			while (meta[cursor] != '{') {
+				vpath.push_back(meta[cursor++]);
+			}
+			vpath.pop_back();
+			cursor += 9;
+			std::from_chars(meta + cursor, meta + 256, timestamp);
+
+			auto it = data.find(vpath);
+			if (it != data.end()) {
+				if (it->second.timestamp < timestamp) {
+					it->second.path = file.path();
+					it->second.timestamp = timestamp;
+				}
+			} else {
+				data.insert({ vpath, File{ file.path(), timestamp } });
+			}
+		}
+	}
+
+	for (auto& p : data) {
+		std::string raw = tx::readWholeFileText(p.second.path);
+		std::string_view str(raw.begin() + raw.find('\n') + 1, raw.end());
+
+		fs::path path = fs::path("/home/TX_Jerry/temp/dev-dir-recovery") / p.first;
+		fs::create_directories(path.parent_path());
+		std::ofstream ofs(path);
+		ofs.write(str.data(), str.size());
+		ofs.close();
+	}
+
+
+	return 0;
+}
+```
+
+## 2026-10-30 00:50:58:<br>Category: Development Report<br>Topic: TXGraphics Refactor Overview
+The main objective of this week was targeted to be graphics overhaul, including refactorization of TXLib's TXGraphics infrastructure, and adding features such as camera and window resizing, *as requested by the reviewer from prep week 3*.
+However, the progress of the objective was severely delayed by the process of fixing clangd header parsing issue, and the "Nuked the entire project directory" incident.
+Until now, shall I finally embark on the quest of digging into TXGraphics after approximately 6 months, and attempt to refactor the entire thing to the new standard and demand of TXLib.
+
+## 2026-10-31 05:04:43:<br>Category: Development Report<br>Topic: TXGraphics Refactor: Shaders
+Upon further investigation of OpenGL shader system, a realization of the terribleness of which had manifest.
+*Basically, I hate it.*
+Most of my previous abstractions, including ShaderPipeline and ShaderManager was proven flawed under the general OpenGL architecture, therefore I decided to just sunset both of them
+Now the new workflow is simply use the utility wrapper to create monolithic shader programs and use that directly.
+
 
 
 TXParticleDynamics TODO:
