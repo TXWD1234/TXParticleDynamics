@@ -2,7 +2,6 @@
 
 #pragma once
 #include "impl/utility/rgb.hpp"
-#include "tx/graphics.h"
 #include "utility.hpp"
 
 namespace tx::ParticleDynamics {

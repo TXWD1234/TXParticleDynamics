@@ -1,39 +1,18 @@
 #version 460 core
-#extension GL_ARB_gpu_shader_int64 : require
 
-out gl_PerVertex {
-    vec4 gl_Position;
-    float gl_PointSize;
-    float gl_ClipDistance[];
+layout(std430, binding = 0) readonly buffer posBuffer {
+	vec2 positions[];
 };
 
-layout(location = 0) in vec2  meshPosition;
-layout(location = 1) in vec2  meshUV;
-layout(location = 2) in vec2  instancePosition;
-layout(location = 3) in uvec2 instanceTextureHandle;
-layout(location = 4) in float instanceTextureIndex;
-layout(location = 5) in vec2  instanceScale;
-layout(location = 6) in mat2  instanceRotation; // useless place holder
-layout(location = 8) in uint  instanceColor;
-
-out vec2 uv;
-out flat uint64_t textureHandle;
-out flat float textureIndex;
-out flat uint colorTint;
-
-out flat float radius;
-out flat vec2 center;
-out vec2 position;
+const vec2 SquareVertexPositions[4] = vec2[4](
+    vec2(-1.0, -1.0),
+    vec2( 1.0, -1.0),
+    vec2(-1.0,  1.0),
+    vec2( 1.0,  1.0)
+);
 
 void main() {
-	uv = meshUV;
-	textureHandle = packUint2x32(instanceTextureHandle);
-	textureIndex = instanceTextureIndex;
-	colorTint = instanceColor;
-
-	center = instancePosition;
-	radius = instanceScale.x * 0.5;
-	
-	position = instanceScale * meshPosition + instancePosition;
-    gl_Position = vec4(position, 0.0, 1.0);
+    gl_Position = vec4(
+		positions[gl_InstanceID] + SquareVertexPositions[gl_VertexID] * 0.5,
+		0.0, 1.0);
 }

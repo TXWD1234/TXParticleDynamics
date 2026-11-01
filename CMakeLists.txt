@@ -46,6 +46,7 @@ add_executable(TXProject
 # 	"${src}/utility.hpp"
 # 	"${src}/infrastructure.hpp"
 # 	"${src}/render_engine.hpp"
+# 	"${src}/renderer.hpp"
 # )
 
 target_include_directories(TXProject PRIVATE 
