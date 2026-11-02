@@ -144,8 +144,8 @@ private:
 	// ================ Draw Call Implementation ================
 
 	void draw_impl() {
-		fm.update();
 		dcm.draw();
+		fm.update();
 	}
 };
 } // namespace re
