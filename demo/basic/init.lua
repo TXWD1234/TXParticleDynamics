@@ -1,4 +1,4 @@
-ObjectCount = 64000
+ObjectCount = 40000
 ObjectCounter = 0
 
 local bound = 1

@@ -32,7 +32,6 @@ pd = {}
 
 ---@class RenderEngineConfig
 ---@field Isometric boolean
----@field ObjectRadius number
 
 ---@class ParticleDynamicsRenderEngine
 ---@field config RenderEngineConfig

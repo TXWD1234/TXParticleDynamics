@@ -7,8 +7,11 @@
 #include "impl/geometry.hpp"
 #include "impl/numeric_utils.hpp"
 #include "impl/parted_view.hpp"
+#include "tx/basic_types.hpp"
 #include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
+#include "tx/upset.hpp"
+#include <GLFW/glfw3.h>
 #include <atomic>
 #include <climits>
 #include <concepts>
@@ -551,6 +554,100 @@ private:
 	tx::BasicStorage<T, Allocator> m_data;
 	i32 m_index = 0;
 	u32 m_bufferSize = 0, m_bufferCount = 0;
+};
+
+// ################ Camera System ################
+
+struct CameraControllerConfig {
+	f32 velocity = 0.05f;
+	f32 zoomFactor = 0.9f; // for zoom out
+};
+
+class CameraController {
+public:
+	CameraController(GLFWwindow* window, CameraControllerConfig config_ = CameraControllerConfig{})
+	    : config(config_) {
+		glfwSetScrollCallback(window, [](GLFWwindow*, double, double yoffset) {
+			CameraController::glfwScollReport += yoffset;
+		});
+		glfwSetFramebufferSizeCallback(window, [](GLFWwindow*, int width, int height) {
+			gl::viewPort(0, 0, width, height);
+			CameraController::glfwWindowDimension = uvec2(width, height);
+		});
+	}
+
+	// Func will be invoked with the new camera data if there are any changes
+	template <std::invocable<vec2, vec2, f32> Func>
+	void update(GLFWwindow* window, Func&& f) {
+		updateMovement_impl(window);
+		updateZoom_impl();
+		updateViewport_impl();
+		if (m_changed) f(m_data.pos, m_data.viewportScale, m_data.zoom);
+		m_changed = false;
+	}
+
+public:
+	CameraControllerConfig config;
+
+private:
+	inline static f32 glfwScollReport = 0.0f;
+	inline static uvec2 glfwWindowDimension =
+	    uvec2{ tx::InvalidU32, tx::InvalidU32 };
+
+private:
+	struct {
+		vec2 pos = tx::Origin;
+		vec2 viewportScale = vec2{ 1.0f, 1.0f };
+		f32 zoom = 1.0f;
+	} m_data;
+	bool m_changed = false;
+	uvec2 oldWindowDimension = uvec2{ tx::InvalidU32, tx::InvalidU32 };
+
+	void updateMovement_impl(GLFWwindow* window) {
+		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+			m_changed = true;
+			m_data.pos.y += config.velocity;
+		}
+		if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+			m_changed = true;
+			m_data.pos.y -= config.velocity;
+		}
+		if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+			m_changed = true;
+			m_data.pos.x += config.velocity;
+		}
+		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+			m_changed = true;
+			m_data.pos.x -= config.velocity;
+		}
+	}
+
+	void updateZoom_impl() {
+		if (glfwScollReport == 0.0f) return;
+		m_changed = true;
+
+		if (glfwScollReport < 0) {
+			m_data.zoom *= tx::powi(
+			    config.zoomFactor, static_cast<u32>(std::abs(glfwScollReport)));
+		} else {
+			m_data.zoom *= tx::powi(
+			    1 / config.zoomFactor, static_cast<u32>(std::abs(glfwScollReport)));
+		}
+
+		glfwScollReport = 0.0f;
+	}
+	void updateViewport_impl() {
+		if (glfwWindowDimension == oldWindowDimension) return;
+		m_changed = true;
+
+		m_data.viewportScale = vec2(
+		    std::min(glfwWindowDimension.x, glfwWindowDimension.y) /
+		        static_cast<f32>(glfwWindowDimension.x),
+		    std::min(glfwWindowDimension.x, glfwWindowDimension.y) /
+		        static_cast<f32>(glfwWindowDimension.y));
+
+		oldWindowDimension = glfwWindowDimension;
+	}
 };
 
 

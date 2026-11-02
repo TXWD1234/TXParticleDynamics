@@ -43,6 +43,9 @@ void LuaApplication::configure(
 
 	m_impl->m_configureScript();
 
+	reArg.param.MaxEntityCount = engineArg.param.MaxEntityCount;
+	reArg.param.ObjectRadius = engineArg.param.ObjectRadius;
+
 	auto [engine, re] = f(engineArg, reArg);
 
 	m_impl->pd["param"] = sol::lua_nil;
@@ -122,7 +125,6 @@ void LuaApplication::exposeEngineConfig_impl() {
 
 	m_impl->lua.new_usertype<tx::ParticleDynamics::RenderEngineConfig>(
 	    "RenderEngineConfig",
-	    "Isometric", &tx::ParticleDynamics::RenderEngineConfig::Isometric,
-	    "ObjectRadius", &tx::ParticleDynamics::RenderEngineConfig::ObjectRadius);
+	    "Isometric", &tx::ParticleDynamics::RenderEngineConfig::Isometric);
 }
 } // namespace tx::ParticleDynamics

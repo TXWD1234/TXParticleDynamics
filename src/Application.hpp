@@ -102,15 +102,13 @@ private:
 		                      tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
 		                   -> tx::ParticleDynamics::EngineCollection {
 			engine.emplace(engineArg.param, engineArg.config);
-			re.emplace(reArg.param, reArg.config);
+			re.emplace(reArg.param, reArg.config, framework.getWindow());
 			return { &engine.value(), &re.value() };
 		});
 		lua->init();
 
 		return 1;
 	}
-
-
 
 	std::optional<tx::ParticleDynamics::Engine> engine;
 	std::optional<tx::ParticleDynamics::RenderEngine> re;
@@ -119,9 +117,10 @@ private:
 	void update() {
 		lua->runtime();
 		engine->update();
+		re->update(framework.getWindow());
 	}
 	void render() {
-		engine->draw([this](std::span<tx::vec2> _) { re->draw(_); });
+		engine->draw([this](std::span<const tx::vec2> _) { re->draw(_); });
 	}
 };
 

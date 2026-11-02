@@ -42,15 +42,15 @@ class Engine {
 public:
 	Engine(EngineParameters param, EngineConfig config)
 	    : m_param(param.SubstepCount, param.ObjectRadius,
-	              lastPowTwo(static_cast<u32>(std::ceil(1.0 / param.ObjectRadius)))),
+		          lastPowTwo(static_cast<u32>(std::ceil(1.0 / param.ObjectRadius)))),
 	      m_data(tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
-	             tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
-	             std::vector<vec2>(param.MaxEntityCount)),
+		         tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
+		         std::vector<vec2>(param.MaxEntityCount)),
 	      m_config(config), m_threads(param.ThreadCount),
 	      m_distor(m_threads),
 	      m_gs(param.MaxEntityCount, m_param.GridSideCellCount,
-	           m_threads, GridSystemBufferSorter_impl{ &m_data },
-	           m_state.threadStatusCounter.get()) {}
+		       m_threads, GridSystemBufferSorter_impl{ &m_data },
+		       m_state.threadStatusCounter.get()) {}
 
 	Engine(const Engine& other) = delete;
 	Engine& operator=(const Engine& other) = delete;
@@ -62,7 +62,7 @@ public:
 
 	void update() { update_impl(m_param.SubstepCount); }
 
-	template <std::invocable<const std::span<vec2>> Func>
+	template <std::invocable<std::span<const vec2>> Func>
 	void draw(Func&& f) {
 		f(std::span(m_data.pos.begin(), m_data.pos.begin() + m_state.objectCount));
 	}
