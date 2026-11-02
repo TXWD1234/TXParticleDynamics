@@ -33,7 +33,7 @@ inline void glfwSetKeyCallback(GLFWwindow* window, T* _this) {
 		    }
 	    });
 }
-inline vec2 glfwGetCursorPos(GLFWwindow* window) {
+inline uvec2 glfwGetCursorPos(GLFWwindow* window) {
 	static int width;
 	static int height;
 	static bool inited = [&]() {
@@ -44,9 +44,7 @@ inline vec2 glfwGetCursorPos(GLFWwindow* window) {
 	}();
 	double x, y;
 	glfwGetCursorPos(window, &x, &y);
-	x = (x - width) / (width);
-	y = -(y - height) / (height);
-	return vec2(x, y);
+	return uvec2(static_cast<u32>(x), static_cast<u32>(y));
 }
 constexpr int GLFW_NUM_KEYS[] = {
 	GLFW_KEY_0,

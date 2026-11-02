@@ -11,6 +11,7 @@
 #include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
 #include "tx/upset.hpp"
+#include "utility.hpp"
 #include <GLFW/glfw3.h>
 #include <atomic>
 #include <climits>
@@ -603,6 +604,18 @@ private:
 	bool m_changed = false;
 	uvec2 oldWindowDimension = uvec2{ tx::InvalidU32, tx::InvalidU32 };
 
+	struct {
+		vec2 dragLastPos;
+		bool isDragging = false;
+	} m_state;
+
+private:
+	vec2 normalizeMousePos_impl(uvec2 pos) {
+		return vec2((pos.x - oldWindowDimension.x * 0.5f) / (oldWindowDimension.x * 0.5f),
+		            -(pos.y - oldWindowDimension.y * 0.5f) / (oldWindowDimension.y * 0.5f));
+	}
+
+private:
 	void updateMovement_impl(GLFWwindow* window) {
 		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
 			m_changed = true;
@@ -619,6 +632,21 @@ private:
 		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
 			m_changed = true;
 			m_data.pos.x -= config.velocity;
+		}
+		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) ||
+		    glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
+			m_changed = true;
+
+			vec2 mousePos = normalizeMousePos_impl(tx::glfwGetCursorPos(window));
+
+			if (m_state.isDragging)
+				m_data.pos -= mousePos - m_state.dragLastPos;
+
+			m_state.dragLastPos = mousePos;
+
+			m_state.isDragging = true;
+		} else {
+			m_state.isDragging = false;
 		}
 	}
 
