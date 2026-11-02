@@ -689,6 +689,39 @@ Upon further investigation of OpenGL shader system, a realization of the terribl
 Most of my previous abstractions, including ShaderPipeline and ShaderManager was proven flawed under the general OpenGL architecture, therefore I decided to just sunset both of them
 Now the new workflow is simply use the utility wrapper to create monolithic shader programs and use that directly.
 
+## 2026-11-01 22:42:18:<br>Category: Development Report<br>Topic: Uniform
+*I was expecting the uniform to be much harder, but apparently it was as simple as calling RingBufferObject's API. However, stupid me still couldn't do it faster then what I expected.*
+Uniform (and SSBO) had always been a missing piece of TXGraphics. Back when TXGraphics was first implemented, uniform was still an unfamiliar concept for me, and since I didn't had any usage of it, I thereby didn't even bother learning it.
+But now, as demanded by the reviewer (window resizing), camera system is necessary, therefore made Uniforms necessary.
+Implementation of Uniform is rather simple, but what I document for future maintainer *(probably just me)* is: Uniform objects requires certain alignments; Construct the uniform object according to OpenGL official documentation.
+
+## 2026-11-01 22:42:06:<br>Category: Development Report<br>Topic: TXParticleDynamics Graphics Refactor Retrospective
+*This refactor was originally scheduled after the optimizations, but since the reviewer had requested it, it's priority was raised.*
+In this Graphics Refactor, the graphical manifest of the Engine demo, as well as the underlying graphics library (TXGrpahics) were thoroughly refactored.
+
+### TXGraphics
+- Refactor all buffers
+- Refactor Shader Management
+- Add Uniform
+- Add SSBO
+- Deprecate ShaderPipeline
+- Deprecate ShaderManager
+- Add The Simple Pipeline
+
+### TXParticleDynamics
+- Add Camera System
+  - Support navigation
+  - Support zoom in / out
+  - Support window resize
+- Renderer Refactor
+  - Remove redundent copies
+    - Significantly reduce rendering overhead
+
+
+
+
+
+// report: The Simple Pipeline
 
 
 TXParticleDynamics TODO:
@@ -696,3 +729,5 @@ TXParticleDynamics TODO:
 - Lua Test Suite - precision, object control
   - Investigate energy accumulation casued by substep decrement
 - Per-Object Gravity 
+- camera: middle mouse button hold drag
+- lua: params of camera

@@ -40,6 +40,8 @@ done
 ```
 
 # Screenshot
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/graphics-1.png)
+![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/graphics-2.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/gs-demo-1.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/gs-demo-2.png)
 ![Screenshot](https://github.com/TXWD1234/TXParticleDynamics/raw/main/docs/readme-assets/galaxy.png)
@@ -96,3 +98,8 @@ The engine exposes a set of Lua APIs that can be called in a lua script. Which m
 3. Edit entry `"script"` in `config/config.json` to your demo's path. It is the relative path from project root to the demo.
 4. Take reference to the `api.lua` file and other existing demos.
 5. Start writing your custom script!
+
+# Control
+In the demo program, user can utilize the following keys to navigate the space simulated by the engine:
+- **Moving the camera:** WASD / Mouse Middle / Left Button Drag
+- **Zoom (in/out):** Mouse Middle Button

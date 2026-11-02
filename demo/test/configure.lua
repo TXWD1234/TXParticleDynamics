@@ -1,6 +1,5 @@
 pd.param.SubstepCount = 1
 pd.param.ObjectRadius = 0.028
-re.config.ObjectRadius = 0.028
 --pd.config.Gravity = 0.000004
 pd.config.Gravity = 0.00000
 pd.param.MaxEntityCount = 160000
