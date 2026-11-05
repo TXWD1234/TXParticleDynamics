@@ -99,6 +99,10 @@ The engine exposes a set of Lua APIs that can be called in a lua script. Which m
 4. Take reference to the `api.lua` file and other existing demos.
 5. Start writing your custom script!
 
+## Compatibility Issues
+**The pre-build binary does not work on Windows, and is compiled targeting Arch Linux. Windows users please download the source code and build from source.**
+There are known issues for the graphics pipeline to render properly on the AMD GPUs. NVIDIA GPUs was tested to be compatible.
+
 # Control
 In the demo program, user can utilize the following keys to navigate the space simulated by the engine:
 - **Moving the camera:** WASD / Mouse Middle / Left Button Drag
