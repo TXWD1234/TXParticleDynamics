@@ -1,7 +1,7 @@
 // Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
 
 #pragma once
-#include "impl/geometry.hpp"
+#include "tx/impl/geometry.hpp"
 #include "tx/basic_types.hpp"
 #include <mutex>
 #include <utility>

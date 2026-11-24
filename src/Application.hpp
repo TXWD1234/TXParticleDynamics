@@ -2,12 +2,12 @@
 
 #pragma once
 #include "Project.hpp"
-#include "impl/io_file.hpp"
+#include "tx/impl/io_file.hpp"
 #include "infrastructure.hpp"
 #include "render_engine.hpp"
 #include "lua_application.hpp"
 #include "utility.hpp"
-#include "impl/geometry.hpp"
+#include "tx/impl/geometry.hpp"
 #include "tx/json.h"
 #include <iostream>
 #include <optional>

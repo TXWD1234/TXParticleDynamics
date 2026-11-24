@@ -4,6 +4,8 @@
 
 //template class tx::impl::OverlayMMW<tx::impl::RingBufferOverlayBase, int>;
 
+using namespace tx;
+
 int main() {
 	return application();
 }

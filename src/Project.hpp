@@ -3,11 +3,12 @@
 #pragma once
 #include "infrastructure.hpp"
 #include "debug.hpp"
-#include "impl/basic_storage.hpp"
-#include "impl/data_utils.hpp"
-#include "impl/geom_utils.hpp"
-#include "impl/geometry.hpp"
-#include "impl/numeric_utils.hpp"
+#include "tx/impl/basic_storage.hpp"
+#include "tx/impl/data_utils.hpp"
+#include "tx/impl/geom_utils.hpp"
+#include "tx/impl/geometry.hpp"
+#include "tx/impl/numeric_utils.hpp"
+#include "tx/basic_types.hpp"
 #include "tx/type_traits.hpp"
 #include <atomic>
 #include <bit>
@@ -620,7 +621,7 @@ private:
 			};
 			template <class T>
 			using SBuffer = tx::BasicStorage<T>;
-			// constant buffer init once at startup
+			// constant buffer containing value init once at startup
 			template <class T>
 			using CBuffer = tx::BasicStorage<T>;
 
@@ -780,6 +781,12 @@ private:
 				            m_data.primarySortBucketIndex.data + 1 +
 				                tIndex * m_state.RadixBucketCount });
 			    });
+
+			// random patch from Gemini
+			m_data.primarySortBucketIndex
+			    .data[m_source.threads.size() *
+				          m_state.RadixBucketCount +
+				      1] = m_data.sourceGridPos.count;
 		}
 		// sorting
 		void constructParimarySortSort_impl() {
@@ -1131,6 +1138,7 @@ private:
 	void updateGravity_impl() {
 		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
 
+		u32 counter = 0;
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			vec2 v = -m_data.pos[i]; // Vector pointing toward origin
 			f32 dist2 = lengthsq(v);
@@ -1141,7 +1149,10 @@ private:
 
 			// ACCUMULATE ACCELERATION. Notice: NO dt, and DO NOT touch pos!
 			m_data.acc[i] += v * (m_config.Gravity * inv_denom);
+			counter += negligible(m_data.acc[i].x) &&
+			           negligible(m_data.acc[i].y);
 		}
+		//std::cout << counter << '\n';
 	}
 };
 
@@ -1157,4 +1168,7 @@ private:
  * Grid System:
  * - [P01] (adopted) instead of making a grid system array, rearrange the position array
  *   directly. Effectively sorting the position buffer.
+ * - [P06] polar coordinate grid system - a circle range
+ * - [P07] cell-local position to increase floating point accuracy
+ * - [P08] 2-level recursive grid for bigger coverage while mitigating cache explosion
  */

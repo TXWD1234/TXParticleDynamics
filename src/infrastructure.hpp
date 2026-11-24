@@ -1,12 +1,12 @@
 // Copyright (c) 2026 TXParticleDynamics. Licensed under the MIT License.
 
 #pragma once
-#include "impl/allocator.hpp"
-#include "impl/basic_storage.hpp"
-#include "impl/data_utils.hpp"
-#include "impl/geometry.hpp"
-#include "impl/numeric_utils.hpp"
-#include "impl/parted_view.hpp"
+#include "tx/impl/allocator.hpp"
+#include "tx/impl/basic_storage.hpp"
+#include "tx/impl/data_utils.hpp"
+#include "tx/impl/geometry.hpp"
+#include "tx/impl/numeric_utils.hpp"
+#include "tx/impl/parted_view.hpp"
 #include "tx/basic_types.hpp"
 #include "tx/exception.hpp"
 #include "tx/type_traits.hpp"
@@ -14,7 +14,6 @@
 #include "utility.hpp"
 #include <GLFW/glfw3.h>
 #include <atomic>
-#include <climits>
 #include <concepts>
 #include <memory>
 #include <thread>

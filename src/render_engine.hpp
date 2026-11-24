@@ -4,7 +4,7 @@
 #include "renderer.hpp"
 #include "infrastructure.hpp"
 #include "utility.hpp"
-#include "impl/utility/rgb.hpp"
+#include "tx/impl/utility/rgb.hpp"
 #include <GLFW/glfw3.h>
 
 namespace tx::ParticleDynamics {
