@@ -577,13 +577,14 @@ public:
 	}
 
 	// Func will be invoked with the new camera data if there are any changes
+	// pos, viewportScale, zoom
 	template <std::invocable<vec2, vec2, f32> Func>
 	void update(GLFWwindow* window, Func&& f) {
 		updateMovement_impl(window);
-		updateZoom_impl();
+		updateZoom_impl(window);
 		updateViewport_impl();
-		if (m_changed) f(m_data.pos, m_data.viewportScale, m_data.zoom);
-		m_changed = false;
+		if (m_state.diff) f(m_data.pos * m_data.zoom, m_data.viewportScale, m_data.zoom);
+		m_state.diff = false;
 	}
 
 public:
@@ -596,52 +597,66 @@ private:
 
 private:
 	struct {
+		// position are always in world coordinates
 		vec2 pos = tx::Origin;
 		vec2 viewportScale = vec2{ 1.0f, 1.0f };
 		f32 zoom = 1.0f;
 	} m_data;
-	bool m_changed = false;
-	uvec2 oldWindowDimension = uvec2{ tx::InvalidU32, tx::InvalidU32 };
 
 	struct {
 		vec2 dragLastPos;
+		uvec2 lastWindowDimension = uvec2{ tx::InvalidU32, tx::InvalidU32 };
 		bool isDragging = false;
+		bool diff = false;
 	} m_state;
 
 private:
+	// ================ Helpers ================
+
+	// find NDC on screen from mouse position
 	vec2 normalizeMousePos_impl(uvec2 pos) {
-		return vec2((pos.x - oldWindowDimension.x * 0.5f) / (oldWindowDimension.x * 0.5f),
-		            -(pos.y - oldWindowDimension.y * 0.5f) / (oldWindowDimension.y * 0.5f));
+		return vec2((pos.x - m_state.lastWindowDimension.x * 0.5f) /
+		                (m_state.lastWindowDimension.x * 0.5f),
+		            -(pos.y - m_state.lastWindowDimension.y * 0.5f) /
+		                (m_state.lastWindowDimension.y * 0.5f));
+	}
+	// find world coordinate from screen NDC
+	vec2 findWorldCoordinate_impl(vec2 pos) {
+		return m_data.pos + pos / m_data.zoom;
 	}
 
 private:
 	void updateMovement_impl(GLFWwindow* window) {
 		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-			m_changed = true;
+			m_state.diff = true;
 			m_data.pos.y += config.velocity;
 		}
 		if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-			m_changed = true;
+			m_state.diff = true;
 			m_data.pos.y -= config.velocity;
 		}
 		if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-			m_changed = true;
+			m_state.diff = true;
 			m_data.pos.x += config.velocity;
 		}
 		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-			m_changed = true;
+			m_state.diff = true;
 			m_data.pos.x -= config.velocity;
 		}
 		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) ||
 		    glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {
-			m_changed = true;
+			m_state.diff = true;
 
-			vec2 mousePos = normalizeMousePos_impl(tx::glfwGetCursorPos(window));
+			vec2 mousePos = findWorldCoordinate_impl(
+			    normalizeMousePos_impl(tx::glfwGetCursorPos(window)));
 
-			if (m_state.isDragging)
-				m_data.pos -= mousePos - m_state.dragLastPos;
-
-			m_state.dragLastPos = mousePos;
+			if (m_state.isDragging) {
+				vec2 delta = mousePos - m_state.dragLastPos;
+				m_data.pos -= delta;
+				m_state.dragLastPos = mousePos - delta;
+			} else {
+				m_state.dragLastPos = mousePos;
+			}
 
 			m_state.isDragging = true;
 		} else {
@@ -649,34 +664,38 @@ private:
 		}
 	}
 
-	void updateZoom_impl() {
+	void zoom_impl(f32 zoomFactor, vec2 anchor) {
+		m_data.zoom *= zoomFactor;
+		m_data.pos = anchor + (m_data.pos - anchor) / zoomFactor;
+	}
+	void updateZoom_impl(GLFWwindow* window) {
 		if (glfwScollReport == 0.0f) return;
-		m_changed = true;
+		m_state.diff = true;
 
-		if (glfwScollReport < 0) {
-			m_data.zoom *= tx::powi(
-			    config.zoomFactor, static_cast<u32>(std::abs(glfwScollReport)));
-		} else {
-			m_data.zoom *= tx::powi(
-			    1 / config.zoomFactor, static_cast<u32>(std::abs(glfwScollReport)));
-		}
+		f32 zoomFactor = tx::powi(
+		    glfwScollReport < 0 ? config.zoomFactor : 1 / config.zoomFactor,
+		    static_cast<u32>(std::abs(glfwScollReport)));
+		zoom_impl(zoomFactor,
+		          findWorldCoordinate_impl(
+		              normalizeMousePos_impl(
+		                  tx::glfwGetCursorPos(window))));
 
 		glfwScollReport = 0.0f;
 	}
 	void updateViewport_impl() {
-		if (glfwWindowDimension == oldWindowDimension) return;
-		m_changed = true;
+		if (glfwWindowDimension == m_state.lastWindowDimension) return;
+		m_state.diff = true;
 
+		// normalized dimension scale
 		m_data.viewportScale = vec2(
 		    std::min(glfwWindowDimension.x, glfwWindowDimension.y) /
 		        static_cast<f32>(glfwWindowDimension.x),
 		    std::min(glfwWindowDimension.x, glfwWindowDimension.y) /
 		        static_cast<f32>(glfwWindowDimension.y));
 
-		oldWindowDimension = glfwWindowDimension;
+		m_state.lastWindowDimension = glfwWindowDimension;
 	}
 };
-
 
 
 template <std::invocable<std::string_view> Func =
@@ -686,5 +705,4 @@ inline void checkHardwareSupport(Func&& f = Func{}) {
 		f("[Warning]: Target machine missing Bit Manipulation Instruction Set 2 "
 		  "(BMI2) support. Some features or optimizations might be unavailable.");
 }
-
 } // namespace tx

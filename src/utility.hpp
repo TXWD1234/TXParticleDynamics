@@ -34,14 +34,6 @@ inline void glfwSetKeyCallback(GLFWwindow* window, T* _this) {
 	    });
 }
 inline uvec2 glfwGetCursorPos(GLFWwindow* window) {
-	static int width;
-	static int height;
-	static bool inited = [&]() {
-		glfwGetWindowSize(window, &width, &height);
-		width *= 0.5;
-		height *= 0.5;
-		return 1;
-	}();
 	double x, y;
 	glfwGetCursorPos(window, &x, &y);
 	return uvec2(static_cast<u32>(x), static_cast<u32>(y));
