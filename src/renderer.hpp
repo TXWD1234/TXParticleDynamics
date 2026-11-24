@@ -20,7 +20,7 @@ struct RendererParameters {
 };
 
 namespace impl::details {
-constexpr const char* VertexSource = R"(#version 460 core
+constexpr const char* VertSource = R"(#version 460 core
 
 layout(std140, binding = 0) uniform Environment {
     float radius;
@@ -83,7 +83,7 @@ public:
 	Renderer(RendererParameters param)
 	    : m_shader([] {
 		      std::optional<ShaderProgram> program = re::buildShader(
-		          impl::details::VertexSource, impl::details::FragSource);
+		          impl::details::VertSource, impl::details::FragSource);
 		      if (!program) throw std::runtime_error("Failed to build shaders");
 		      return std::move(*program);
 	      }()),

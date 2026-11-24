@@ -12,6 +12,8 @@
 #include <iostream>
 #include <optional>
 
+using namespace tx::primitives;
+
 class Application {
 private:
 	struct UpdateFunc {
@@ -94,7 +96,7 @@ private:
 			} else {
 				std::cerr << "[Error] Failed to read config.json. Entry \"script\""
 				             " does not exist or is not string type.\n";
-				return 0;
+				return false;
 			}
 		}
 		lua.emplace(demoPath);
@@ -107,12 +109,17 @@ private:
 		});
 		lua->init();
 
-		return 1;
+		dbre.emplace();
+		if (!dbre) return false;
+
+		return true;
 	}
 
 	std::optional<tx::ParticleDynamics::Engine> engine;
 	std::optional<tx::ParticleDynamics::RenderEngine> re;
 	std::optional<tx::ParticleDynamics::LuaApplication> lua;
+
+	std::optional<tx::ParticleDynamics::DebugRenderer> dbre; // debug render engine
 
 	void update() {
 		lua->runtime();
@@ -120,6 +127,9 @@ private:
 		re->update(framework.getWindow());
 	}
 	void render() {
+		dbre->drawLine(vec2{ -1.0, -1.0 }, vec2{ 1.0, 1.0 });
+
+		dbre->draw();
 		engine->draw([this](std::span<const tx::vec2> _) { re->draw(_); });
 	}
 };
