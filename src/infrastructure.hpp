@@ -629,19 +629,19 @@ private:
 	void updateMovement_impl(GLFWwindow* window) {
 		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
 			m_state.diff = true;
-			m_data.pos.y += config.velocity;
+			m_data.pos.y += config.velocity / m_data.zoom;
 		}
 		if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
 			m_state.diff = true;
-			m_data.pos.y -= config.velocity;
+			m_data.pos.y -= config.velocity / m_data.zoom;
 		}
 		if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
 			m_state.diff = true;
-			m_data.pos.x += config.velocity;
+			m_data.pos.x += config.velocity / m_data.zoom;
 		}
 		if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
 			m_state.diff = true;
-			m_data.pos.x -= config.velocity;
+			m_data.pos.x -= config.velocity / m_data.zoom;
 		}
 		if (glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) ||
 		    glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT)) {

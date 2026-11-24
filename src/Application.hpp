@@ -127,7 +127,10 @@ private:
 		re->update(framework.getWindow());
 	}
 	void render() {
-		dbre->drawLine(vec2{ -1.0, -1.0 }, vec2{ 1.0, 1.0 });
+		f32 a = 0.25656854249;
+		dbre->drawLine(vec2{ -1.0f, -1.0f }, vec2{ 1.0f, 1.0f });
+		dbre->drawLine(vec2{ -a, 0.0f }, vec2{ 0.0f, -a });
+		dbre->drawLine(vec2{ a, 0.0f }, vec2{ 0.0f, a });
 
 		dbre->draw();
 		engine->draw([this](std::span<const tx::vec2> _) { re->draw(_); });

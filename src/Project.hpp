@@ -1016,6 +1016,7 @@ private:
 private:
 	// ################ Logic Implementation ################
 
+	u32 counter = 0;
 	void update_impl(u32 substep) {
 		f32 dt = 1.0f / static_cast<f32>(substep);
 		while (substep--) {
@@ -1025,6 +1026,13 @@ private:
 			//checkGSValid_impl(); // DevNote: debug
 			updateGS_impl();
 			updateCollision_impl();
+
+			//// find kenetic energy sum
+			//f32 acc = 0.0;
+			//for (u32 i = 0; i < m_state.objectCount; i++) {
+			//	acc += tx::lengthsq(findVel_impl(i));
+			//}
+			//std::cout << counter++ << "\t" << std::fixed << std::setprecision(7) << acc * 0.5f << '\n';
 		}
 	}
 
@@ -1092,26 +1100,31 @@ private:
 	}
 	// Collision Solver, the core physics logic
 	void solveCollision_impl(u32 a, u32 b) {
+		//std::cout << "collision ********************************************** ";
 		vec2 diff = m_data.pos[a] - m_data.pos[b];
 		f32 dist = tx::length(diff);
 		vec2 nuv = tx::normalize(diff, dist);
 
-		// push apart
+		vec2 relVel = findVel_impl(a) - findVel_impl(b); // relative velocity
+		f32 nRelVel = dot(relVel, nuv);
+
+		//std::cout << "RelVel Before Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
+		//std::cout << "Kenetic energy before Solving: " << (sq(findVel_impl(a)) + sq(findVel_impl(b))) * 0.5f << ' ';
+
+		// ---------------- Overlap Correction ----------------
 		f32 overlap = (m_param.ObjectRadius * 2 - dist) * 0.5f;
 		vec2 push = overlap * nuv;
-
 		// apply push apart
 		m_data.pos[a] += push;
 		m_data.pos[b] -= push;
 
-		// m_data.prevPos[a] += push;
-		// m_data.prevPos[b] -= push;
+		m_data.prevPos[a] += push;
+		m_data.prevPos[b] -= push;
 
-		// calculate impulse
-		vec2 relVel = findVel_impl(a) - findVel_impl(b); // relative velocity
-		f32 nRelVel = dot(relVel, nuv);
+		//std::cout << "RelVel After Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
 
-		if (nRelVel >= -0.0001f) return;
+		// ---------------- Bounce Impluse ----------------
+		// if (nRelVel >= -0.0001f) return;
 		// nRelVel = std::min(0.0f, nRelVel);
 
 		// solve bounce
@@ -1120,22 +1133,48 @@ private:
 		vec2 impulseVec = nuv * bounceImpulse;
 		m_data.prevPos[a] += impulseVec;
 		m_data.prevPos[b] -= impulseVec;
+
+		//std::cout << "RelVel After Impulse Application: " << findVel_impl(a) - findVel_impl(b) << ' ';
+		//std::cout << "After: " << (sq(findVel_impl(a)) + sq(findVel_impl(b))) * 0.5f << ' ';
+		//std::cout << '\n';
 	}
 
 	// ================ Update Verlet ================
 
+	bool lastIsPositive = true;
+	u32 intervalCounter = 0;
 	void updateObject_impl(f32 dt) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			vec2 vel = findVel_impl(i) * m_config.Friction;
 			m_data.prevPos[i] = m_data.pos[i];
 			m_data.pos[i] += vel + m_data.acc[i] * sq(dt);
+			vec2 delta = vel + m_data.acc[i] * sq(dt);
+
+			//std::cout << vel + m_data.acc[i] * sq(dt) << ' ';
+			//if (lastIsPositive) {
+			//	if (delta.x < 0 && delta.y < 0) {
+			//		lastIsPositive = false;
+			//		std::cout << "Positive extreme: " << m_data.prevPos[i]
+			//		          << "Interval: " << intervalCounter << '\n';
+			//		intervalCounter = 0;
+			//	}
+			//} else {
+			//	if (delta.x >= 0 && delta.y >= 0) {
+			//		lastIsPositive = true;
+			//		std::cout << "Negative extreme: " << m_data.prevPos[i]
+			//		          << "Interval: " << intervalCounter << '\n';
+			//		intervalCounter = 0;
+			//	}
+			//}
+			//intervalCounter++;
 			m_data.acc[i] = tx::Origin;
 		}
+		//std::cout << '\n';
 	}
 
 	// ================ Update Gravity ================
 
-	void updateGravity_impl() {
+	void updateGravity_implo() {
 		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
 
 		u32 counter = 0;
@@ -1152,7 +1191,13 @@ private:
 			counter += negligible(m_data.acc[i].x) &&
 			           negligible(m_data.acc[i].y);
 		}
-		//std::cout << counter << '\n';
+		////std::cout << counter << '\n';
+	}
+	void updateGravity_impl() {
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			vec2 nuv = tx::normalize(-m_data.pos[i]);
+			m_data.acc[i] += nuv * m_config.Gravity;
+		}
 	}
 };
 
