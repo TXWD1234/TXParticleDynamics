@@ -5,6 +5,7 @@
 #include "tx/basic_types.hpp"
 #include "tx/graphics.h"
 #include "tx/impl/gl_core/fence_manager.hpp"
+#include <iomanip>
 #include <mutex>
 #include <vector>
 #include <fstream>
@@ -15,10 +16,7 @@ namespace tx::ParticleDynamics {
 
 inline struct Debugger {
 	struct Argument {
-		vec2 v;
-		u32 actual;
-		u32 expected;
-		u32 gridElementCount;
+		f32 v;
 	};
 
 	std::vector<Argument> data;
@@ -36,12 +34,9 @@ inline struct Debugger {
 	void save(std::string_view filepath) {
 		std::ofstream ofs(filepath.data());
 
-		std::sort(data.begin(), data.end(), [](Argument a, Argument b) {
-			return a.expected < b.expected;
-		});
-
+		u32 counter = 0;
 		for (auto i : data) {
-			ofs << i.v << ' ' << i.expected << ' ' << i.actual << '\n';
+			ofs << counter++ << '\t' << std::fixed << std::setprecision(7) << i.v << '\n';
 		}
 
 		ofs.close();

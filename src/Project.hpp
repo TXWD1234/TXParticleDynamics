@@ -13,6 +13,7 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <fstream>
 #include <memory>
 #include <type_traits>
 
@@ -46,7 +47,9 @@ public:
 		          lastPowTwo(static_cast<u32>(std::ceil(1.0 / param.ObjectRadius)))),
 	      m_data(tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
 		         tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
-		         std::vector<vec2>(param.MaxEntityCount)),
+		         std::vector<vec2>(param.MaxEntityCount),
+		         std::vector<vec2>(param.MaxEntityCount),
+		         std::vector<u16>(param.MaxEntityCount)),
 	      m_config(config), m_threads(param.ThreadCount),
 	      m_distor(m_threads),
 	      m_gs(param.MaxEntityCount, m_param.GridSideCellCount,
@@ -75,7 +78,7 @@ public:
 
 	u32 createObject(vec2 pos, vec2 initVel = tx::Origin) {
 		m_data.pos[m_state.objectCount] = pos;
-		m_data.prevPos[m_state.objectCount] = pos - initVel;
+		m_data.vel[m_state.objectCount] = initVel;
 		m_state.objectCount++;
 		return m_state.objectCount - 1;
 	}
@@ -84,7 +87,7 @@ public:
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			if (isColliding(m_data.pos[i], pos, radius)) {
 				vec2 nuv = tx::normalize(m_data.pos[i] - pos);
-				m_data.pos[i] += nuv * intensity;
+				m_data.acc[i] += nuv * intensity;
 			}
 		}
 	}
@@ -92,7 +95,7 @@ public:
 	// default to clock-wise. set magnitude to negative for counter-clockwise
 	void applyRotationalForce(f32 magnitude, vec2 center = tx::Origin) {
 		for (u32 i = 0; i < m_state.objectCount; i++)
-			applyVel_impl(i, tx::rightPerp(tx::normalize(center - m_data.pos[i])) * magnitude);
+			m_data.acc[i] += tx::rightPerp(tx::normalize(center - m_data.pos[i])) * magnitude;
 	}
 
 private:
@@ -107,8 +110,10 @@ private:
 
 	struct Data_impl {
 		tx::AlternatingBuffer<vec2> pos;
-		tx::AlternatingBuffer<vec2> prevPos;
+		tx::AlternatingBuffer<vec2> vel;
 		std::vector<vec2> acc;
+		std::vector<vec2> newpos;
+		std::vector<u16> collisionCounter;
 		// std::vector<u32> ids; // ID of objects to adapt sorting
 	} m_data;
 
@@ -129,7 +134,7 @@ private:
 		Data_impl* m_data;
 		void operator()(u32 prev, u32 curr) {
 			m_data->pos.buffer(1)[curr] = m_data->pos.buffer(0)[prev];
-			m_data->prevPos.buffer(1)[curr] = m_data->prevPos.buffer(0)[prev];
+			m_data->vel.buffer(1)[curr] = m_data->vel.buffer(0)[prev];
 		}
 	};
 
@@ -519,19 +524,23 @@ private:
 	}
 
 private:
-	// ################ Implementation Utility ################
-
-	vec2 findVel_impl(u32 id) { return m_data.pos[id] - m_data.prevPos[id]; }
-	void applyVel_impl(u32 id, vec2 vel) { m_data.prevPos[id] -= vel; }
-
-private:
 	// ################ Physics Logic Utility ################
 
 	static bool isColliding(vec2 a, vec2 b, f32 dist) {
-		return sq(a.x - b.x) + sq(a.y - b.y) < sq(dist);
+		//return lengthsq(a - b) < sq(dist * 1.2f); // slop
+		return lengthsq(a - b) < sq(dist); // slop
 	}
 	bool isColliding(u32 a, u32 b) {
 		return isColliding(m_data.pos[a], m_data.pos[b], m_param.ObjectRadius * 2);
+	}
+	static f32 sub_abs_cap(f32 v, f32 sub) {
+		if (std::abs(v) < std::abs(sub)) return 0.0f;
+		return v - sub;
+	}
+	static vec2 applyAirResistance(vec2 vel) {
+		vec2 uv = normalize(vel);
+		return vec2(sub_abs_cap(vel.x, uv.x * 0.0002f),
+		            sub_abs_cap(vel.y, uv.y * 0.0002f));
 	}
 
 private:
@@ -987,31 +996,31 @@ private:
 		    });
 
 		m_data.pos.swap();
-		m_data.prevPos.swap();
+		m_data.vel.swap();
 	}
 
 private:
 	// ################ Grid System Debugging ################
 
-	void checkGSValid_impl() {
-		updateGS_impl();
-		tx::PackedPartedView view = m_gs.view(m_data.pos.data());
-		for (u32 i = 0; i < view.size_partition(); i++) {
-			std::span s = view[i];
-			for (u32 j = 0; j < s.size(); j++) {
-				u32 actual = tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
-				    s[j], m_param.GridSideCellCount));
-				if (i != actual) {
-					//std::cerr << "[Error]: GS check failed!" << std::endl;
-					debugger.terminate();
-					debugger.push(
-					    { s[j], i, actual, (u32)s.size() });
-				}
-			}
-		}
-		//debugger.save("/home/TX_Jerry/Programming/dev/TXParticleDynamics/build/bin/debug.txt");
-		//debugger.terminate();
-	}
+	// void checkGSValid_impl() {
+	// 	updateGS_impl();
+	// 	tx::PackedPartedView view = m_gs.view(m_data.pos.data());
+	// 	for (u32 i = 0; i < view.size_partition(); i++) {
+	// 		std::span s = view[i];
+	// 		for (u32 j = 0; j < s.size(); j++) {
+	// 			u32 actual = tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
+	// 			    s[j], m_param.GridSideCellCount));
+	// 			if (i != actual) {
+	// 				//std::cerr << "[Error]: GS check failed!" << std::endl;
+	// 				debugger.terminate();
+	// 				debugger.push(
+	// 				    { s[j], i, actual, (u32)s.size() });
+	// 			}
+	// 		}
+	// 	}
+	// 	//debugger.save("/home/TX_Jerry/Programming/dev/TXParticleDynamics/build/bin/debug.txt");
+	// 	//debugger.terminate();
+	// }
 
 private:
 	// ################ Logic Implementation ################
@@ -1082,7 +1091,11 @@ private:
 		}
 	}
 
+	f32 maxPenetration = 0.0f;
 	void updateCollision_impl() {
+		std::fill(m_data.collisionCounter.begin(), m_data.collisionCounter.end(), 0);
+		std::copy(m_data.pos.begin(), m_data.pos.end(), m_data.newpos.begin());
+
 		const u32 n = m_param.GridSideCellCount;
 		for (u32 x = 1; x < n - 1; x++)
 			for (u32 y = 0; y < n - 1; y++)
@@ -1097,6 +1110,18 @@ private:
 			    { n - 1, y });
 		}
 		updateCollisionGrid_impl<0>({ 0, n - 1 });
+
+		std::copy(m_data.newpos.begin(), m_data.newpos.end(), m_data.pos.begin());
+
+		debugger.push({ maxPenetration });
+		maxPenetration = 0;
+	}
+	void accCorrection_impl(u32 id, vec2 push) {
+		m_data.newpos[id] =
+		    (m_data.newpos[id] * static_cast<f32>(m_data.collisionCounter[id]) +
+			 (m_data.pos[id] + push)) /
+		    static_cast<f32>(m_data.collisionCounter[id] + 1);
+		m_data.collisionCounter[id]++;
 	}
 	// Collision Solver, the core physics logic
 	void solveCollision_impl(u32 a, u32 b) {
@@ -1105,7 +1130,7 @@ private:
 		f32 dist = tx::length(diff);
 		vec2 nuv = tx::normalize(diff, dist);
 
-		vec2 relVel = findVel_impl(a) - findVel_impl(b); // relative velocity
+		vec2 relVel = m_data.vel[a] - m_data.vel[b]; // relative velocity
 		f32 nRelVel = dot(relVel, nuv);
 
 		//std::cout << "RelVel Before Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
@@ -1113,26 +1138,26 @@ private:
 
 		// ---------------- Overlap Correction ----------------
 		f32 overlap = (m_param.ObjectRadius * 2 - dist) * 0.5f;
+		maxPenetration = std::max(overlap, maxPenetration);
 		vec2 push = overlap * nuv;
 		// apply push apart
-		m_data.pos[a] += push;
-		m_data.pos[b] -= push;
-
-		m_data.prevPos[a] += push;
-		m_data.prevPos[b] -= push;
+		accCorrection_impl(a, push);
+		accCorrection_impl(b, -push);
 
 		//std::cout << "RelVel After Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
 
 		// ---------------- Bounce Impluse ----------------
-		// if (nRelVel >= -0.0001f) return;
+		//return;
+		if (nRelVel > 0.0f) return;
+		//if (nRelVel >= -0.001f) return;
+		//if (nRelVel >= 0.0f) return;
 		// nRelVel = std::min(0.0f, nRelVel);
-
 		// solve bounce
 		f32 bounceImpulse = nRelVel * (1.0f + m_config.Restitution) * 0.5f;
 		//f32 bounceImpulse = nRelVel * m_config.Restitution;
 		vec2 impulseVec = nuv * bounceImpulse;
-		m_data.prevPos[a] += impulseVec;
-		m_data.prevPos[b] -= impulseVec;
+		m_data.vel[a] -= impulseVec;
+		m_data.vel[b] += impulseVec;
 
 		//std::cout << "RelVel After Impulse Application: " << findVel_impl(a) - findVel_impl(b) << ' ';
 		//std::cout << "After: " << (sq(findVel_impl(a)) + sq(findVel_impl(b))) * 0.5f << ' ';
@@ -1145,10 +1170,8 @@ private:
 	u32 intervalCounter = 0;
 	void updateObject_impl(f32 dt) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			vec2 vel = findVel_impl(i) * m_config.Friction;
-			m_data.prevPos[i] = m_data.pos[i];
-			m_data.pos[i] += vel + m_data.acc[i] * sq(dt);
-			vec2 delta = vel + m_data.acc[i] * sq(dt);
+			m_data.vel[i] = m_data.vel[i] * m_config.Friction + m_data.acc[i] * dt;
+			m_data.pos[i] += m_data.vel[i] * dt;
 
 			//std::cout << vel + m_data.acc[i] * sq(dt) << ' ';
 			//if (lastIsPositive) {
@@ -1174,7 +1197,7 @@ private:
 
 	// ================ Update Gravity ================
 
-	void updateGravity_implo() {
+	void updateGravity_impl_bak() {
 		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
 
 		u32 counter = 0;
@@ -1193,10 +1216,25 @@ private:
 		}
 		////std::cout << counter << '\n';
 	}
-	void updateGravity_impl() {
+	void updateGravity_impl_center() {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			vec2 nuv = tx::normalize(-m_data.pos[i]);
+			vec2 nuv = normalize(-m_data.pos[i]);
 			m_data.acc[i] += nuv * m_config.Gravity;
+		}
+	}
+	void updateGravity_impl() {
+		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
+		for (u32 i = 0; i < m_state.objectCount; i++) {
+			// calculate the gravitational acceleration of i
+			for (u32 j = 0; j < m_state.objectCount; j++) {
+				if (i == j) continue;
+				vec2 delta = m_data.pos[j] - m_data.pos[i];
+				f32 dist2 = lengthsq(delta);
+				// also guards i == j
+				//if (dist2 <= sq(m_param.ObjectRadius * 2.0)) continue;
+				vec2 nuv = normalize(delta);
+				m_data.acc[i] += nuv * (m_config.Gravity / (dist2 + eps2));
+			}
 		}
 	}
 };

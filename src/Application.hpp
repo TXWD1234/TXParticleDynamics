@@ -9,6 +9,7 @@
 #include "utility.hpp"
 #include "tx/impl/geometry.hpp"
 #include "tx/json.h"
+#include <GLFW/glfw3.h>
 #include <iostream>
 #include <optional>
 
@@ -149,5 +150,6 @@ inline int application() {
 	app.run();
 
 	std::cout << "[Status]: Terminating...\n";
+	tx::ParticleDynamics::debugger.save("debug.txt");
 	return 0;
 }
