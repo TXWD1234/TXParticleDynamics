@@ -9,6 +9,7 @@
 #include "utility.hpp"
 #include "tx/impl/geometry.hpp"
 #include "tx/json.h"
+#include <GLFW/glfw3.h>
 #include <iostream>
 #include <optional>
 
@@ -28,9 +29,9 @@ private:
 			ptr->render();
 		}
 	};
-	tx::RE::Framework<
+	std::optional<tx::RE::Framework<
 	    re::Mode::FixTickRate | re::Mode::PrintFrameRate,
-	    UpdateFunc, RenderFunc>
+	    UpdateFunc, RenderFunc>>
 	    framework;
 
 	bool initGLFW() {
@@ -55,11 +56,8 @@ private:
 public:
 	Application() {
 		if (!initGLFW()) return;
-		framework = decltype(framework){
-			UpdateFunc{ this },
-			RenderFunc{ this }
-		};
-		if (!framework.valid()) return;
+		framework.emplace(UpdateFunc{ this }, RenderFunc{ this });
+		if (!framework) return;
 		if (!initGLAD()) return;
 		if (!init()) return;
 		m_valid = 1;
@@ -68,13 +66,25 @@ public:
 		glfwTerminate();
 	}
 
-	void run() { this->framework.run(); }
+	void run() { framework->run(); }
 	bool valid() const { return m_valid; }
 
 private:
 	void onKeyEvent(GLFWwindow* window, int key, int scancode, int action, int mods) {
 		if (action == GLFW_PRESS || action == GLFW_REPEAT) {
 			switch (key) {
+			case GLFW_KEY_SPACE: m_paused = !m_paused; break;
+			case GLFW_KEY_LEFT:
+				framework->setTickrate(
+				    std::max(1.0, framework->getTickrate() -
+					                  ((mods & GLFW_MOD_CONTROL) ? 30.0 : 1.0)));
+				std::cout << framework->getTickrate() << '\n';
+				break;
+			case GLFW_KEY_RIGHT:
+				framework->setTickrate(framework->getTickrate() +
+				                       ((mods & GLFW_MOD_CONTROL) ? 30.0 : 1.0));
+				std::cout << framework->getTickrate() << '\n';
+				break;
 			}
 		}
 	}
@@ -82,7 +92,8 @@ private:
 private:
 	bool init() {
 		tx::checkHardwareSupport();
-		tx::glfwSetKeyCallback<Application, &Application::onKeyEvent>(framework.getWindow(), this);
+		tx::glfwSetKeyCallback<Application, &Application::onKeyEvent>(
+		    framework->getWindow(), this);
 		tx::glBasicSettings();
 		stbi_set_flip_vertically_on_load(true);
 		glfwSwapInterval(0); // turn off vsync
@@ -104,7 +115,7 @@ private:
 		                      tx::ParticleDynamics::LuaApplication::RenderEngineArg reArg)
 		                   -> tx::ParticleDynamics::EngineCollection {
 			engine.emplace(engineArg.param, engineArg.config);
-			re.emplace(reArg.param, reArg.config, framework.getWindow());
+			re.emplace(reArg.param, reArg.config, framework->getWindow());
 			return { &engine.value(), &re.value() };
 		});
 		lua->init();
@@ -121,16 +132,23 @@ private:
 
 	std::optional<tx::ParticleDynamics::DebugRenderer> dbre; // debug render engine
 
+	bool m_paused = false;
 	void update() {
+		re->update(framework->getWindow());
+		if (m_paused) return;
 		lua->runtime();
 		engine->update();
-		re->update(framework.getWindow());
 	}
 	void render() {
 		f32 a = 0.25656854249;
 		dbre->drawLine(vec2{ -1.0f, -1.0f }, vec2{ 1.0f, 1.0f });
 		dbre->drawLine(vec2{ -a, 0.0f }, vec2{ 0.0f, -a });
 		dbre->drawLine(vec2{ a, 0.0f }, vec2{ 0.0f, a });
+
+		dbre->drawLine(vec2{ -1.0f, -1.0f }, vec2{ 1.0f, -1.0f });
+		dbre->drawLine(vec2{ -1.0f, -1.0f }, vec2{ -1.0f, 1.0f });
+		dbre->drawLine(vec2{ 1.0f, 1.0f }, vec2{ 1.0f, -1.0f });
+		dbre->drawLine(vec2{ 1.0f, 1.0f }, vec2{ -1.0f, 1.0f });
 
 		dbre->draw();
 		engine->draw([this](std::span<const tx::vec2> _) { re->draw(_); });

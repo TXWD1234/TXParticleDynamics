@@ -42,8 +42,9 @@ local bound = 0.3
 -- pd.createObject( 0.08 * 2,  0.08 * 2)
 -- pd.createObject( 0.09 * 2,  0.09 * 2)
 
-for i = 1, 100, 1 do
-	pd.createObject(rand(-0.4, 0.4), rand(-0.4, 0.4))
+local range = 1.0
+for i = 1, 240000, 1 do
+	pd.createObject(rand(-range, range), rand(-range, range))
 end
 
 -- pd.createObject(rand(-0.9, 0.9), rand(-0.9, 0.9), rand(-0.0, 0.0), rand(-0.0, 0.0))

@@ -650,7 +650,7 @@ private:
 			 */
 		} m_data;
 
-		void initState_impl(u32 n, u32 gn) {
+		void initState_impl(u32, u32 gn) {
 			m_state.SideCellCount = gn;
 			m_state.RadixBucketCount = gn;
 			m_state.RadixDigit = std::bit_width(sq(gn) - 1) / 2;
@@ -993,30 +993,29 @@ private:
 private:
 	// ################ Grid System Debugging ################
 
-	void checkGSValid_impl() {
-		updateGS_impl();
-		tx::PackedPartedView view = m_gs.view(m_data.pos.data());
-		for (u32 i = 0; i < view.size_partition(); i++) {
-			std::span s = view[i];
-			for (u32 j = 0; j < s.size(); j++) {
-				u32 actual = tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
-				    s[j], m_param.GridSideCellCount));
-				if (i != actual) {
-					//std::cerr << "[Error]: GS check failed!" << std::endl;
-					debugger.terminate();
-					debugger.push(
-					    { s[j], i, actual, (u32)s.size() });
-				}
-			}
-		}
-		//debugger.save("/home/TX_Jerry/Programming/dev/TXParticleDynamics/build/bin/debug.txt");
-		//debugger.terminate();
-	}
+	// void checkGSValid_impl() {
+	// 	updateGS_impl();
+	// 	tx::PackedPartedView view = m_gs.view(m_data.pos.data());
+	// 	for (u32 i = 0; i < view.size_partition(); i++) {
+	// 		std::span s = view[i];
+	// 		for (u32 j = 0; j < s.size(); j++) {
+	// 			u32 actual = tx::ZGridToIndex(TaskGSConstructSourceGridPos::findGridPos(
+	// 			    s[j], m_param.GridSideCellCount));
+	// 			if (i != actual) {
+	// 				//std::cerr << "[Error]: GS check failed!" << std::endl;
+	// 				debugger.terminate();
+	// 				debugger.push(
+	// 				    { s[j], i, actual, (u32)s.size() });
+	// 			}
+	// 		}
+	// 	}
+	// 	//debugger.save("/home/TX_Jerry/Programming/dev/TXParticleDynamics/build/bin/debug.txt");
+	// 	//debugger.terminate();
+	// }
 
 private:
 	// ################ Logic Implementation ################
 
-	u32 counter = 0;
 	void update_impl(u32 substep) {
 		f32 dt = 1.0f / static_cast<f32>(substep);
 		while (substep--) {
@@ -1118,8 +1117,10 @@ private:
 		m_data.pos[a] += push;
 		m_data.pos[b] -= push;
 
-		m_data.prevPos[a] += push;
-		m_data.prevPos[b] -= push;
+		return;
+
+		// m_data.prevPos[a] += push;
+		// m_data.prevPos[b] -= push;
 
 		//std::cout << "RelVel After Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
 
@@ -1148,7 +1149,6 @@ private:
 			vec2 vel = findVel_impl(i) * m_config.Friction;
 			m_data.prevPos[i] = m_data.pos[i];
 			m_data.pos[i] += vel + m_data.acc[i] * sq(dt);
-			vec2 delta = vel + m_data.acc[i] * sq(dt);
 
 			//std::cout << vel + m_data.acc[i] * sq(dt) << ' ';
 			//if (lastIsPositive) {
@@ -1177,7 +1177,6 @@ private:
 	void updateGravity_implo() {
 		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
 
-		u32 counter = 0;
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			vec2 v = -m_data.pos[i]; // Vector pointing toward origin
 			f32 dist2 = lengthsq(v);
@@ -1188,8 +1187,6 @@ private:
 
 			// ACCUMULATE ACCELERATION. Notice: NO dt, and DO NOT touch pos!
 			m_data.acc[i] += v * (m_config.Gravity * inv_denom);
-			counter += negligible(m_data.acc[i].x) &&
-			           negligible(m_data.acc[i].y);
 		}
 		////std::cout << counter << '\n';
 	}
