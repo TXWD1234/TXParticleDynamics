@@ -9,7 +9,6 @@
 #include "utility.hpp"
 #include "tx/impl/geometry.hpp"
 #include "tx/json.h"
-#include <GLFW/glfw3.h>
 #include <iostream>
 #include <optional>
 
