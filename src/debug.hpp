@@ -5,8 +5,10 @@
 #include "tx/basic_types.hpp"
 #include "tx/graphics.h"
 #include "tx/impl/gl_core/fence_manager.hpp"
+#include <chrono>
 #include <iomanip>
 #include <mutex>
+#include <ratio>
 #include <vector>
 #include <fstream>
 #include <string_view>
@@ -15,16 +17,42 @@
 namespace tx::ParticleDynamics {
 
 inline struct Debugger {
+	Debugger() : start(std::chrono::steady_clock::now()) {}
+	const std::chrono::steady_clock::time_point start;
+
+	u32 now() const {
+		auto elapsed = std::chrono::steady_clock::now() - start;
+		return static_cast<u32>(
+		    std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count());
+	}
+
 	struct Argument {
 		f32 v;
 	};
 
 	std::vector<Argument> data;
+	struct Data {
+		f32 max = 0.0f;
+		f32 mean = 0.0f;
+		u32 n = 0;
+	} data_;
 	std::mutex mtx;
 
-	void push(Argument arg) {
-		std::lock_guard<std::mutex> lock(mtx);
-		data.push_back(arg);
+	bool saved = false;
+	void push(f32 p) {
+		//std::lock_guard<std::mutex> lock(mtx);
+		//data.push_back(arg);
+		if (now() >= 20000000) {
+			if (!saved) {
+				saved = true;
+				save("debug.txt");
+			}
+			std::cout << "STOP\n";
+			return;
+		}
+		data_.max = std::max(p, data_.max);
+		data_.mean = (data_.mean * data_.n + p) / (data_.n + 1);
+		data_.n++;
 	}
 
 	void clear() {
@@ -32,12 +60,11 @@ inline struct Debugger {
 	}
 
 	void save(std::string_view filepath) {
-		std::ofstream ofs(filepath.data());
+		std::ofstream ofs(filepath.data(), std::ios::app);
 
-		u32 counter = 0;
-		for (auto i : data) {
-			ofs << counter++ << '\t' << std::fixed << std::setprecision(7) << i.v << '\n';
-		}
+		ofs << "n = " << data_.n << '\n'
+		    << "max = " << data_.max << '\n'
+		    << "mean = " << data_.mean << '\n';
 
 		ofs.close();
 	}

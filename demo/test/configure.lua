@@ -1,4 +1,4 @@
-pd.param.SubstepCount = 4
+pd.param.SubstepCount = 1
 pd.param.ObjectRadius = 0.01
 pd.config.Gravity = 0.0000001
 --pd.config.Gravity = 0.00000001
@@ -9,6 +9,7 @@ pd.config.Friction = 0.99
 
 ObjectCount = 2
 
+math.randomseed(65536)
 function rand(min, max)
 	return math.random() * (max - min) + min
 end

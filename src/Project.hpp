@@ -13,7 +13,6 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
-#include <fstream>
 #include <memory>
 #include <type_traits>
 
@@ -1033,8 +1032,10 @@ private:
 			updateObject_impl(dt);
 
 			//checkGSValid_impl(); // DevNote: debug
-			updateGS_impl();
-			updateCollision_impl();
+			for (u32 i = 0; i < 1; i++) {
+				updateGS_impl();
+				updateCollision_impl();
+			}
 
 			//// find kenetic energy sum
 			//f32 acc = 0.0;
@@ -1091,7 +1092,6 @@ private:
 		}
 	}
 
-	f32 maxPenetration = 0.0f;
 	void updateCollision_impl() {
 		std::fill(m_data.collisionCounter.begin(), m_data.collisionCounter.end(), 0);
 		std::copy(m_data.pos.begin(), m_data.pos.end(), m_data.newpos.begin());
@@ -1112,9 +1112,6 @@ private:
 		updateCollisionGrid_impl<0>({ 0, n - 1 });
 
 		std::copy(m_data.newpos.begin(), m_data.newpos.end(), m_data.pos.begin());
-
-		debugger.push({ maxPenetration });
-		maxPenetration = 0;
 	}
 	void accCorrection_impl(u32 id, vec2 push) {
 		m_data.newpos[id] =
@@ -1138,8 +1135,8 @@ private:
 
 		// ---------------- Overlap Correction ----------------
 		f32 overlap = (m_param.ObjectRadius * 2 - dist) * 0.5f;
-		maxPenetration = std::max(overlap, maxPenetration);
 		vec2 push = overlap * nuv;
+		debugger.push(overlap);
 		// apply push apart
 		accCorrection_impl(a, push);
 		accCorrection_impl(b, -push);

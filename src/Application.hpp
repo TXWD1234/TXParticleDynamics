@@ -150,6 +150,5 @@ inline int application() {
 	app.run();
 
 	std::cout << "[Status]: Terminating...\n";
-	tx::ParticleDynamics::debugger.save("debug.txt");
 	return 0;
 }
