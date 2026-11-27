@@ -46,9 +46,7 @@ public:
 		          lastPowTwo(static_cast<u32>(std::ceil(1.0 / param.ObjectRadius)))),
 	      m_data(tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
 		         tx::AlternatingBuffer<vec2>(param.MaxEntityCount),
-		         std::vector<vec2>(param.MaxEntityCount),
-		         std::vector<vec2>(param.MaxEntityCount),
-		         std::vector<u16>(param.MaxEntityCount)),
+		         std::vector<vec2>(param.MaxEntityCount)),
 	      m_config(config), m_threads(param.ThreadCount),
 	      m_distor(m_threads),
 	      m_gs(param.MaxEntityCount, m_param.GridSideCellCount,
@@ -111,8 +109,6 @@ private:
 		tx::AlternatingBuffer<vec2> pos;
 		tx::AlternatingBuffer<vec2> vel;
 		std::vector<vec2> acc;
-		std::vector<vec2> newpos;
-		std::vector<u16> collisionCounter;
 		// std::vector<u32> ids; // ID of objects to adapt sorting
 	} m_data;
 
@@ -1093,9 +1089,6 @@ private:
 	}
 
 	void updateCollision_impl() {
-		std::fill(m_data.collisionCounter.begin(), m_data.collisionCounter.end(), 0);
-		std::copy(m_data.pos.begin(), m_data.pos.end(), m_data.newpos.begin());
-
 		const u32 n = m_param.GridSideCellCount;
 		for (u32 x = 1; x < n - 1; x++)
 			for (u32 y = 0; y < n - 1; y++)
@@ -1110,15 +1103,11 @@ private:
 			    { n - 1, y });
 		}
 		updateCollisionGrid_impl<0>({ 0, n - 1 });
-
-		std::copy(m_data.newpos.begin(), m_data.newpos.end(), m_data.pos.begin());
 	}
-	void accCorrection_impl(u32 id, vec2 push) {
-		m_data.newpos[id] =
-		    (m_data.newpos[id] * static_cast<f32>(m_data.collisionCounter[id]) +
-			 (m_data.pos[id] + push)) /
-		    static_cast<f32>(m_data.collisionCounter[id] + 1);
-		m_data.collisionCounter[id]++;
+	void applyCorrection_impl(u32 id, vec2 push) {
+		vec2 prevPos = m_data.pos[id] - m_data.vel[id];
+		m_data.pos[id] += push;
+		m_data.vel[id] = m_data.pos[id] - prevPos;
 	}
 	// Collision Solver, the core physics logic
 	void solveCollision_impl(u32 a, u32 b) {
@@ -1127,8 +1116,8 @@ private:
 		f32 dist = tx::length(diff);
 		vec2 nuv = tx::normalize(diff, dist);
 
-		vec2 relVel = m_data.vel[a] - m_data.vel[b]; // relative velocity
-		f32 nRelVel = dot(relVel, nuv);
+		//vec2 relVel = m_data.vel[a] - m_data.vel[b]; // relative velocity
+		//f32 nRelVel = dot(relVel, nuv);
 
 		//std::cout << "RelVel Before Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
 		//std::cout << "Kenetic energy before Solving: " << (sq(findVel_impl(a)) + sq(findVel_impl(b))) * 0.5f << ' ';
@@ -1136,29 +1125,29 @@ private:
 		// ---------------- Overlap Correction ----------------
 		f32 overlap = (m_param.ObjectRadius * 2 - dist) * 0.5f;
 		vec2 push = overlap * nuv;
-		debugger.push(overlap);
 		// apply push apart
-		accCorrection_impl(a, push);
-		accCorrection_impl(b, -push);
+		applyCorrection_impl(a, push);
+		applyCorrection_impl(b, -push);
 
 		//std::cout << "RelVel After Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
 
-		// ---------------- Bounce Impluse ----------------
-		//return;
-		if (nRelVel > 0.0f) return;
-		//if (nRelVel >= -0.001f) return;
-		//if (nRelVel >= 0.0f) return;
-		// nRelVel = std::min(0.0f, nRelVel);
-		// solve bounce
-		f32 bounceImpulse = nRelVel * (1.0f + m_config.Restitution) * 0.5f;
-		//f32 bounceImpulse = nRelVel * m_config.Restitution;
-		vec2 impulseVec = nuv * bounceImpulse;
-		m_data.vel[a] -= impulseVec;
-		m_data.vel[b] += impulseVec;
+		return;
+		// // ---------------- Bounce Impluse ----------------
+		// //return;
+		// if (nRelVel > 0.0f) return;
+		// //if (nRelVel >= -0.001f) return;
+		// //if (nRelVel >= 0.0f) return;
+		// // nRelVel = std::min(0.0f, nRelVel);
+		// // solve bounce
+		// f32 bounceImpulse = nRelVel * (1.0f + m_config.Restitution) * 0.5f;
+		// //f32 bounceImpulse = nRelVel * m_config.Restitution;
+		// vec2 impulseVec = nuv * bounceImpulse;
+		// m_data.vel[a] -= impulseVec;
+		// m_data.vel[b] += impulseVec;
 
-		//std::cout << "RelVel After Impulse Application: " << findVel_impl(a) - findVel_impl(b) << ' ';
-		//std::cout << "After: " << (sq(findVel_impl(a)) + sq(findVel_impl(b))) * 0.5f << ' ';
-		//std::cout << '\n';
+		// //std::cout << "RelVel After Impulse Application: " << findVel_impl(a) - findVel_impl(b) << ' ';
+		// //std::cout << "After: " << (sq(findVel_impl(a)) + sq(findVel_impl(b))) * 0.5f << ' ';
+		// //std::cout << '\n';
 	}
 
 	// ================ Update Verlet ================

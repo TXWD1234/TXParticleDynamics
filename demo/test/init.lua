@@ -15,7 +15,7 @@ local bound = 0.3
 --pd.createObject( 0.7,  0.7)
 --pd.createObject( 0.6,  0.6)
 --pd.createObject( 0.5,  0.5)
---pd.createObject( 0.4,  0.4)
+--pd.createObject( range,  range)
 --pd.createObject( 0.3,  0.3)
 --pd.createObject( 0.2,  0.2)
 --pd.createObject( 0.1,  0.1)
@@ -23,7 +23,7 @@ local bound = 0.3
 --pd.createObject(-0.1, -0.1)
 --pd.createObject(-0.2, -0.2)
 --pd.createObject(-0.3, -0.3)
---pd.createObject(-0.4, -0.4)
+--pd.createObject(-range, -range)
 --pd.createObject(-0.5, -0.5)
 --pd.createObject(-0.6, -0.6)
 --pd.createObject(-0.7, -0.7)
@@ -42,8 +42,9 @@ local bound = 0.3
 -- pd.createObject( 0.08 * 2,  0.08 * 2)
 -- pd.createObject( 0.09 * 2,  0.09 * 2)
 
-for i = 1, 100, 1 do
-	pd.createObject(rand(-0.4, 0.4), rand(-0.4, 0.4))
+local range = 0.8
+for i = 1, 1000, 1 do
+	pd.createObject(rand(-range, range), rand(-range, range))
 end
 
 -- pd.createObject(rand(-0.9, 0.9), rand(-0.9, 0.9), rand(-0.0, 0.0), rand(-0.0, 0.0))
