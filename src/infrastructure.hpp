@@ -580,9 +580,9 @@ public:
 	// pos, viewportScale, zoom
 	template <std::invocable<vec2, vec2, f32> Func>
 	void update(GLFWwindow* window, Func&& f) {
+		updateViewport_impl();
 		updateMovement_impl(window);
 		updateZoom_impl(window);
-		updateViewport_impl();
 		if (m_state.diff) f(m_data.pos * m_data.zoom, m_data.viewportScale, m_data.zoom);
 		m_state.diff = false;
 	}
@@ -622,7 +622,7 @@ private:
 	}
 	// find world coordinate from screen NDC
 	vec2 findWorldCoordinate_impl(vec2 pos) {
-		return m_data.pos + pos / m_data.zoom;
+		return m_data.pos + pos / (m_data.zoom * m_data.viewportScale);
 	}
 
 private:
