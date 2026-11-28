@@ -14,6 +14,7 @@
 ---@field Gravity number
 ---@field Friction number
 ---@field Restitution number
+---@field CorrectionAlpha number
 
 -- The engine
 ---@class ParticleDynamicsEngine

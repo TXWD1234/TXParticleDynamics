@@ -118,7 +118,8 @@ void LuaApplication::exposeEngineConfig_impl() {
 	    "EngineConfig",
 	    "Gravity", &tx::ParticleDynamics::EngineConfig::Gravity,
 	    "Friction", &tx::ParticleDynamics::EngineConfig::Friction,
-	    "Restitution", &tx::ParticleDynamics::EngineConfig::Restitution);
+	    "Restitution", &tx::ParticleDynamics::EngineConfig::Restitution,
+	    "CorrectionAlpha", &tx::ParticleDynamics::EngineConfig::CorrectionAlpha);
 
 	m_impl->lua.new_usertype<tx::ParticleDynamics::RenderEngineParameters>(
 	    "RenderEngineParameter");

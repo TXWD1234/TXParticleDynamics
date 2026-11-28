@@ -6,6 +6,7 @@ pd.config.Gravity = 0.0000002
 pd.param.MaxEntityCount = 240000
 pd.config.Restitution = 1.0
 pd.config.Friction = 0.999
+pd.config.CorrectionAlpha = 0.8
 
 ObjectCount = 2
 

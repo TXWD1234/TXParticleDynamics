@@ -37,6 +37,7 @@ struct EngineConfig {
 	f32 Gravity = 0.0001f;
 	f32 Friction = 0.999f;
 	f32 Restitution = 0.9f;
+	f32 CorrectionAlpha = 0.8f;
 };
 
 class Engine {
@@ -500,8 +501,8 @@ private:
 	// ################ Physics Logic Utility ################
 
 	static bool isColliding(vec2 a, vec2 b, f32 dist) {
-		//return lengthsq(a - b) < sq(dist * 1.2f); // slop
-		return lengthsq(a - b) < sq(dist); // slop
+		return lengthsq(a - b) < sq(dist);
+		//return sq(a.x - b.x) + sq(a.y - b.y) < sq(dist);
 	}
 	bool isColliding(u32 a, u32 b) {
 		return isColliding(m_data.pos[a], m_data.pos[b], m_param.ObjectRadius * 2);
@@ -971,7 +972,6 @@ private:
 private:
 	// ################ Logic Implementation ################
 
-	u32 counter = 0;
 	void update_impl(u32 substep) {
 		f32 dt = 1.0f / static_cast<f32>(substep);
 		while (substep--) {
@@ -979,10 +979,8 @@ private:
 			updateObject_impl(dt);
 
 			//checkGSValid_impl(); // DevNote: debug
-			for (u32 i = 0; i < 1; i++) {
-				updateGS_impl();
-				updateCollision_impl();
-			}
+			updateGS_impl();
+			updateCollision_impl();
 
 			//// find kenetic energy sum
 			//f32 acc = 0.0;
@@ -1076,8 +1074,10 @@ private:
 		f32 overlap = (m_param.ObjectRadius * 2 - dist) * 0.5f;
 		vec2 push = overlap * nuv;
 		// apply push apart
-		applyCorrection_impl(a, push);
-		applyCorrection_impl(b, -push);
+		m_data.pos[a] += push;
+		m_data.vel[a] += push * m_config.CorrectionAlpha;
+		m_data.pos[b] -= push;
+		m_data.vel[b] -= push * m_config.CorrectionAlpha;
 
 		//std::cout << "RelVel After Overlap Correction: " << findVel_impl(a) - findVel_impl(b) << ' ';
 
@@ -1104,10 +1104,10 @@ private:
 
 	bool lastIsPositive = true;
 	u32 intervalCounter = 0;
-	void updateObject_impl(f32 dt) {
+	void updateObject_impl(f32) {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			m_data.vel[i] = m_data.vel[i] * m_config.Friction + m_data.acc[i] * dt;
-			m_data.pos[i] += m_data.vel[i] * dt;
+			m_data.vel[i] = m_data.vel[i] * m_config.Friction + m_data.acc[i];
+			m_data.pos[i] += m_data.vel[i];
 
 			//std::cout << vel + m_data.acc[i] * sq(dt) << ' ';
 			//if (lastIsPositive) {
@@ -1151,7 +1151,7 @@ private:
 	}
 	void updateGravity_impl() {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
-			vec2 nuv = normalize(-m_data.pos[i]);
+			vec2 nuv = tx::normalize(-m_data.pos[i]);
 			m_data.acc[i] += nuv * m_config.Gravity;
 		}
 	}
