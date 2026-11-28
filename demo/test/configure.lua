@@ -13,3 +13,11 @@ math.randomseed(65536)
 function rand(min, max)
 	return math.random() * (max - min) + min
 end
+function randCoord(range)
+	return rand(-range, range), rand(-range, range)
+end
+function randPolar(min, max)
+	local degree = rand(0, 6.283185307)
+	local length = rand(min, max)
+	return math.cos(degree) * length, math.sin(degree) * length
+end
