@@ -626,7 +626,7 @@ private:
 			 */
 		} m_data;
 
-		void initState_impl(u32 n, u32 gn) {
+		void initState_impl(u32, u32 gn) {
 			m_state.SideCellCount = gn;
 			m_state.RadixBucketCount = gn;
 			m_state.RadixDigit = std::bit_width(sq(gn) - 1) / 2;
@@ -1056,9 +1056,8 @@ private:
 		updateCollisionGrid_impl<0>({ 0, n - 1 });
 	}
 	void applyCorrection_impl(u32 id, vec2 push) {
-		vec2 prevPos = m_data.pos[id] - m_data.vel[id];
 		m_data.pos[id] += push;
-		m_data.vel[id] = m_data.pos[id] - prevPos;
+		m_data.vel[id] += push;
 	}
 	// Collision Solver, the core physics logic
 	void solveCollision_impl(u32 a, u32 b) {
@@ -1137,7 +1136,6 @@ private:
 	void updateGravity_impl_bak() {
 		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
 
-		u32 counter = 0;
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			vec2 v = -m_data.pos[i]; // Vector pointing toward origin
 			f32 dist2 = lengthsq(v);
@@ -1148,18 +1146,16 @@ private:
 
 			// ACCUMULATE ACCELERATION. Notice: NO dt, and DO NOT touch pos!
 			m_data.acc[i] += v * (m_config.Gravity * inv_denom);
-			counter += negligible(m_data.acc[i].x) &&
-			           negligible(m_data.acc[i].y);
 		}
 		////std::cout << counter << '\n';
 	}
-	void updateGravity_impl_center() {
+	void updateGravity_impl() {
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			vec2 nuv = normalize(-m_data.pos[i]);
 			m_data.acc[i] += nuv * m_config.Gravity;
 		}
 	}
-	void updateGravity_impl() {
+	void updateGravity_impl_per() {
 		constexpr f32 eps2 = 0.05f * 0.05f; // Macro softening radius for 2.0x2.0 world
 		for (u32 i = 0; i < m_state.objectCount; i++) {
 			// calculate the gravitational acceleration of i
