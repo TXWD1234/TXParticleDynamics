@@ -181,7 +181,6 @@ private:
 		struct Argument {
 			u32* destGridPos;
 			u32* destObjectID;
-			u32* destInv;
 			u32* src; // grid pos raw
 			u32 srcSize;
 			u32 idBase;
@@ -190,7 +189,6 @@ private:
 		void operator()(std::variant<Args...>& varg) {
 			Argument& arg = std::get<Argument>(varg);
 			u32 dest = 0;
-			u32 invDest = 0;
 			for (u32 i = 0; i < arg.srcSize; i++) {
 				// arg.destGridPos[dest] = arg.src[i];
 				// arg.destObjectID[dest] = i + arg.idBase;
@@ -199,9 +197,6 @@ private:
 					arg.destGridPos[dest] = arg.src[i];
 					arg.destObjectID[dest] = i + arg.idBase;
 					dest++;
-				} else {
-					arg.destInv[invDest] = i + arg.idBase;
-					invDest++;
 				}
 			}
 		}
@@ -401,22 +396,6 @@ private:
 		}
 	};
 
-	struct TaskGSBridgeCopyInvObject {
-		struct Argument {
-			u32* src; // indices
-			u32 size;
-			u32 destBegin; // offseted
-			GridSystemBufferSorter_impl sorter;
-		};
-		template <class... Args>
-		void operator()(std::variant<Args...>& varg) {
-			Argument& arg = std::get<Argument>(varg);
-			for (u32 i = 0; i < arg.size; i++) {
-				arg.sorter(arg.src[i], arg.destBegin + i);
-			}
-		}
-	};
-
 	struct TaskFence {
 		struct Argument {
 			std::atomic<u32>* counter;
@@ -440,8 +419,7 @@ private:
 	    TaskGSConstructSecondarySortBucketIndexPSA,
 	    TaskGSConstructSecondarySortSort,
 	    TaskGSConstructSecondarySortIndexArraySum,
-	    TaskGSConstructSecondarySortIndexArrayPSA,
-	    TaskGSBridgeCopyInvObject>;
+	    TaskGSConstructSecondarySortIndexArrayPSA>;
 
 	template <class T>
 	using ThreadArgumentExtract_t = typename T::Argument;
@@ -578,9 +556,6 @@ private:
 		}
 		u32 objectCount() { return indexArray.back(); }
 
-		std::span<u32> invalidObjects() { return std::span<u32>(
-			m_data.sourceInvalidID.data, m_data.sourceInvalidID.count); }
-
 	public:
 		// ================ Public Interface ================
 
@@ -627,10 +602,7 @@ private:
 
 			// when reading names in here, add an imaginary "Array" suffix
 
-			DBuffer<u32> sourceInvalidID;
-
 			SBuffer<u32> sourcePSABase;
-			SBuffer<u32> sourceInvalidPSABase;
 			DBuffer<u32> sourceGridPosRaw;
 			DBuffer<u32> sourceGridPos;
 			DBuffer<u32> sourceObjectID;
@@ -657,11 +629,8 @@ private:
 		}
 		void initBuffers_impl(u32 n, u32 gn, u32 t) {
 			indexArray.resize(sq(gn) + 1);
-			m_data.sourceInvalidID = Data_impl::DBuffer<u32>(n);
 			m_data.sourcePSABase = Data_impl::SBuffer<u32>(t + 1);
 			m_data.sourcePSABase.data[0] = 0;
-			m_data.sourceInvalidPSABase = Data_impl::SBuffer<u32>(t + 1);
-			m_data.sourceInvalidPSABase.data[0] = 0;
 			m_data.sourceGridPosRaw = Data_impl::DBuffer<u32>(n);
 			m_data.sourceGridPos = Data_impl::DBuffer<u32>(n);
 			m_data.sourceObjectID = Data_impl::DBuffer<u32>(n);
@@ -742,14 +711,10 @@ private:
 				    }
 				    m_data.sourcePSABase.data[tIndex] =
 				        m_data.sourcePSABase.data[tIndex - 1] + acc;
-				    m_data.sourceInvalidPSABase.data[tIndex] =
-				        m_data.sourceInvalidPSABase.data[tIndex - 1] + end - begin - acc;
 			    });
 			m_data.sourceGridPos.count =
 			    m_data.sourcePSABase.data[m_data.sourcePSABase.size - 1];
 			m_data.sourceObjectID.count = m_data.sourceGridPos.count;
-			m_data.sourceInvalidID.count =
-			    m_data.sourceInvalidPSABase.data[m_data.sourceInvalidPSABase.size - 1];
 		}
 		void constructSourceCompose_impl() {
 			dispatchProcess_impl(
@@ -759,7 +724,6 @@ private:
 				        TaskGSConstructSourceCompose::Argument{
 				            m_data.sourceGridPos.data + m_data.sourcePSABase.data[tIndex],
 				            m_data.sourceObjectID.data + m_data.sourcePSABase.data[tIndex],
-				            m_data.sourceInvalidID.data + m_data.sourceInvalidPSABase.data[tIndex],
 				            m_data.sourceGridPosRaw.data + begin,
 				            end - begin, begin });
 			    });
@@ -972,20 +936,7 @@ private:
 		m_gs.update(std::span(
 		    m_data.pos.data(), m_data.pos.data() + m_state.objectCount));
 
-		// copy invalid objects to final array
-		std::span<u32> invids = m_gs.invalidObjects(); // invalid ids
-		u32 destBegin = m_gs.objectCount();
-
-		dispatchProcessAligned_impl(
-		    invids.size(), tx::CacheLineCapacity<u32>,
-		    [this, invids, destBegin](u32 begin, u32 end) {
-			    threadAssignFenced_impl<TaskGSBridgeCopyInvObject>(
-			        m_distor, m_state.threadStatusCounter.get(),
-			        TaskGSBridgeCopyInvObject::Argument{
-			            invids.data() + begin, end - begin, destBegin + begin,
-			            GridSystemBufferSorter_impl{ &m_data } });
-		    });
-
+		m_state.objectCount = m_gs.objectCount();
 		m_data.pos.swap();
 		m_data.prevPos.swap();
 	}
